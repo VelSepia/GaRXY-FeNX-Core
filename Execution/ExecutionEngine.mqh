@@ -76,6 +76,7 @@ private:
    int                         m_no_signal_bar_count;
    int                         m_position_open_event_count;
    int                         m_position_close_event_count;
+   int                         m_minimum_volume_adjustment_count;
    long                        m_update_count;
    long                        m_pipeline_block_ticks[FENX_PIPELINE_STAGE_COUNT];
    long                        m_pipeline_block_events[FENX_PIPELINE_STAGE_COUNT];
@@ -397,6 +398,7 @@ public:
       m_no_signal_bar_count=0;
       m_position_open_event_count=0;
       m_position_close_event_count=0;
+      m_minimum_volume_adjustment_count=0;
       m_update_count=0;
       for(int stage=0;stage<FENX_PIPELINE_STAGE_COUNT;stage++)
         {
@@ -457,7 +459,7 @@ public:
                                   parameters.ExecutionOneOrderPerBar());
       m_position_manager.Configure(m_symbol,m_magic_number);
       m_order_executor.Configure(m_magic_number,parameters.ExecutionMaximumSlippagePoints(),
-                                 parameters.ExecutionTransientRetryLimit());
+                                  parameters.ExecutionTransientRetryLimit(),m_fixed_lot);
       CLogger::Info(StringFormat("ExecutionEngine initialized for %s; execution is %s.",m_symbol,
                                  (m_execution_enabled ? "ENABLED" : "DISABLED")));
       return(true);
@@ -579,6 +581,13 @@ public:
          PublishGlobal(snapshot);
          return;
         }
+      if(normalized_request.volume>request.volume+0.00000001)
+        {
+         m_minimum_volume_adjustment_count++;
+         m_trade_logger.InfoOnce(StringFormat(
+            "[PIPELINE] Volume=BROKER_MINIMUM_ADJUSTMENT;requested=%.8f;normalized=%.8f;configured_ceiling=%.8f",
+            request.volume,normalized_request.volume,m_fixed_lot));
+        }
       FillRequestFields(normalized_request,snapshot);
       const double price_tolerance=SymbolInfoDouble(m_symbol,SYMBOL_POINT);
       if(m_duplicate_guard.IsBlocked(normalized_request,price_tolerance,request_reason))
@@ -626,7 +635,7 @@ public:
       CLogger::Info(StringFormat("ExecutionEngine shutdown: entries %d successful, %d failed, %d blocked; closes %d successful, %d failed.",
                                  m_successful_order_count,m_failed_order_count,m_blocked_order_count,
                                  m_successful_close_count,m_failed_close_count));
-      CLogger::Info(StringFormat("[BACKTEST_EXECUTION] updates=%I64d;entry_signals=%d;entry_blocks=%d;no_signal_bars=%d;orders_requested=%d;orders_accepted=%d;orders_rejected=%d;closes_requested=%d;closes_accepted=%d;closes_rejected=%d;entry_retries=%d;close_retries=%d;position_open_events=%d;position_close_events=%d",
+      CLogger::Info(StringFormat("[BACKTEST_EXECUTION] updates=%I64d;entry_signals=%d;entry_blocks=%d;no_signal_bars=%d;orders_requested=%d;orders_accepted=%d;orders_rejected=%d;closes_requested=%d;closes_accepted=%d;closes_rejected=%d;entry_retries=%d;close_retries=%d;position_open_events=%d;position_close_events=%d;minimum_volume_adjustments=%d",
                                  m_update_count,m_entry_signal_count,m_entry_block_event_count,
                                  m_no_signal_bar_count,
                                  m_successful_order_count+m_failed_order_count,
@@ -634,7 +643,7 @@ public:
                                  m_successful_close_count+m_failed_close_count,
                                  m_successful_close_count,m_failed_close_count,
                                  m_entry_retry_count,m_close_retry_count,m_position_open_event_count,
-                                 m_position_close_event_count));
+                                 m_position_close_event_count,m_minimum_volume_adjustment_count));
       for(int stage=0;stage<FENX_PIPELINE_STAGE_COUNT;stage++)
         {
          CLogger::Info(StringFormat("[BACKTEST_PIPELINE] stage=%s;blocked_ticks=%I64d;block_events=%I64d",

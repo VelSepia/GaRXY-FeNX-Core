@@ -609,6 +609,83 @@ private:
              IsTimestampFresh(source.standby_updated_at));
      }
 
+   //--- Append one diagnostic token without obscuring the first failure.
+   void AppendDiagnostic(string &diagnostic,const string value)
+     {
+      if(StringLen(value)==0)
+         return;
+      if(StringLen(diagnostic)>0)
+         diagnostic+="; ";
+      diagnostic+=value;
+     }
+
+   //--- Describe missing, future-dated, or stale timestamps with their measured age.
+   void AppendTimestampDiagnostic(string &diagnostic,const string label,
+                                  const datetime updated_at)
+     {
+      if(updated_at<=0)
+        {
+         AppendDiagnostic(diagnostic,label+"=missing");
+         return;
+        }
+
+      const long age_seconds=(long)(TimeCurrent()-updated_at);
+      if(age_seconds<0)
+         AppendDiagnostic(diagnostic,
+                          StringFormat("%s=future(%d seconds)",label,age_seconds));
+      else if(age_seconds>m_stale_data_limit_seconds)
+         AppendDiagnostic(diagnostic,
+                          StringFormat("%s=stale(%d seconds)",label,age_seconds));
+     }
+
+   //--- Build field-level evidence for global input failures before fail-closed handling.
+   string UpstreamInvalidDiagnostic(const bool environment_available,
+                                    const SRiskEnvironment &environment,
+                                    const bool pipeline_available,
+                                    const SRiskPipeline &pipeline)
+     {
+      string diagnostic="";
+      if(!environment_available)
+         AppendDiagnostic(diagnostic,"environment=missing_or_invalid");
+      else
+        {
+         if(!environment.range_data_valid)
+            AppendDiagnostic(diagnostic,"environment.range_data_valid=false");
+         if(!environment.trend_data_valid)
+            AppendDiagnostic(diagnostic,"environment.trend_data_valid=false");
+         AppendTimestampDiagnostic(diagnostic,"environment.market",environment.market_updated_at);
+         AppendTimestampDiagnostic(diagnostic,"environment.range",environment.range_updated_at);
+         AppendTimestampDiagnostic(diagnostic,"environment.trend",environment.trend_updated_at);
+        }
+
+      if(!pipeline_available)
+         AppendDiagnostic(diagnostic,"pipeline=missing_or_invalid");
+      else
+        {
+         if(!pipeline.pair_ranking_valid)
+            AppendDiagnostic(diagnostic,"pipeline.pair_ranking_valid=false");
+         if(!pipeline.allocation_valid)
+            AppendDiagnostic(diagnostic,"pipeline.allocation_valid=false");
+         if(!pipeline.style_valid)
+            AppendDiagnostic(diagnostic,"pipeline.style_valid=false");
+         if(!pipeline.strategy_valid)
+            AppendDiagnostic(diagnostic,"pipeline.strategy_valid=false");
+         if(!pipeline.standby_valid)
+            AppendDiagnostic(diagnostic,"pipeline.standby_valid=false");
+         AppendTimestampDiagnostic(diagnostic,"pipeline.pair_ranking",
+                                   pipeline.pair_ranking_updated_at);
+         AppendTimestampDiagnostic(diagnostic,"pipeline.allocation",
+                                   pipeline.allocation_updated_at);
+         AppendTimestampDiagnostic(diagnostic,"pipeline.style",pipeline.style_updated_at);
+         AppendTimestampDiagnostic(diagnostic,"pipeline.strategy",pipeline.strategy_updated_at);
+         AppendTimestampDiagnostic(diagnostic,"pipeline.standby",pipeline.standby_updated_at);
+        }
+
+      if(StringLen(diagnostic)==0)
+         diagnostic="no field-level failure identified";
+      return(diagnostic);
+     }
+
    bool LoadSymbols(CParameterManager &parameters)
      {
       const int symbol_count=parameters.MarketSelectionSymbolCount();
@@ -792,9 +869,17 @@ private:
    string CandidateState(const SRiskEnvironment &environment,const SRiskInput &source,
                          const double score,const double confidence,const bool data_valid)
      {
-      if(!data_valid || source.standby_state=="RISK_STOP_PENDING" ||
-         source.standby_recommended_next_state=="RISK_STOP" ||
-         score>=m_risk_stop_threshold)
+      // An explicit Standby risk-stop request remains critical even if another
+      // upstream validity flag is degraded in the same update.
+      if(source.standby_state=="RISK_STOP_PENDING" ||
+         source.standby_recommended_next_state=="RISK_STOP")
+         return("RISK_STOP_REQUIRED");
+      // Missing or temporarily invalid inputs are fail-closed at SUSPENDED.
+      // They block every new entry without treating absence of evidence as an
+      // independently confirmed critical-risk event.
+      if(!data_valid)
+         return("SUSPENDED");
+      if(score>=m_risk_stop_threshold)
          return("RISK_STOP_REQUIRED");
       if(source.standby_state=="ESCALATION_PENDING" ||
          source.standby_recommended_next_state=="DYNAMIC_ZONE" ||
@@ -810,8 +895,12 @@ private:
 
    string RiskReason(const string state,const SRiskInput &source,const bool data_valid)
      {
+      if(state=="RISK_STOP_REQUIRED" &&
+         (source.standby_state=="RISK_STOP_PENDING" ||
+          source.standby_recommended_next_state=="RISK_STOP"))
+         return("Standby explicitly reported a critical condition requiring Risk Stop.");
       if(!data_valid)
-         return("Required risk records are invalid, unavailable, or stale.");
+         return("Required risk records are invalid, unavailable, or stale; new entries remain suspended.");
       if(state=="RISK_STOP_REQUIRED")
          return("Critical risk requires a future Risk Engine handoff without forced closure.");
       if(state=="SUSPENDED" && source.standby_recommended_next_state=="DYNAMIC_ZONE")
@@ -994,15 +1083,47 @@ private:
       return(success);
      }
 
+   //--- Core recovery requires the already-hysteretic final system state plus
+   //--- complete valid inputs and the absence of every escalation or entry block.
+   bool IsCoreRecoveryConfirmed(const SSystemRiskSnapshot &system_snapshot,
+                                const bool has_dynamic_escalation,
+                                const bool has_entry_block)
+     {
+      return(system_snapshot.state=="SYSTEM_SAFE" &&
+             system_snapshot.data_valid &&
+             system_snapshot.trading_allowed &&
+             system_snapshot.new_entries_allowed &&
+             system_snapshot.risk_stop_required_count==0 &&
+             system_snapshot.invalid_symbol_count==0 &&
+             !has_dynamic_escalation &&
+             !has_entry_block);
+     }
+
    void RequestCoreState(const SSystemRiskSnapshot &system_snapshot,
                          const bool has_dynamic_escalation,const bool has_entry_block)
      {
-      if(m_state_manager==NULL || m_state_manager.GetState()==FENX_STATE_SHUTDOWN ||
-         m_state_manager.GetState()==FENX_STATE_RISK_STOP)
+      if(m_state_manager==NULL || m_state_manager.GetState()==FENX_STATE_SHUTDOWN)
          return;
 
+      // StateManager intentionally disallows RISK_STOP -> NORMAL. Once the Risk
+      // Engine's final system state has recovered through its confirmation and
+      // cooldown rules, request only the first safe leg of the recovery path.
+      if(m_state_manager.GetState()==FENX_STATE_RISK_STOP)
+        {
+         if(!IsCoreRecoveryConfirmed(system_snapshot,has_dynamic_escalation,has_entry_block))
+            return;
+         if(m_state_manager.RequestTransition(FENX_STATE_STANDBY,"RiskEngine"))
+           {
+            m_last_requested_state=FENX_STATE_STANDBY;
+            CLogger::Info("RiskEngine confirmed safe recovery from RISK_STOP to STANDBY.");
+           }
+         else
+            CLogger::Error("RiskEngine safe RISK_STOP recovery request was rejected.");
+         return;
+        }
+
       ENUM_FENX_STATE requested_state=FENX_STATE_NORMAL;
-      if(system_snapshot.state=="SYSTEM_RISK_STOP")
+      if(system_snapshot.state=="SYSTEM_RISK_STOP_REQUIRED")
          requested_state=FENX_STATE_RISK_STOP;
       else if(has_dynamic_escalation)
          requested_state=FENX_STATE_DYNAMIC_ZONE;
@@ -1126,7 +1247,10 @@ public:
                                  pipeline.strategy_valid && pipeline.standby_valid);
       if(!upstream_valid && !m_invalid_system_logged)
         {
-         CLogger::Error("RiskEngine detected invalid, missing, or stale upstream risk data.");
+         CLogger::Error(StringFormat(
+            "RiskEngine detected invalid, missing, or stale upstream risk data: %s.",
+            UpstreamInvalidDiagnostic(environment_available,environment,
+                                      pipeline_available,pipeline)));
          m_invalid_system_logged=true;
         }
       if(upstream_valid)
@@ -1162,11 +1286,21 @@ public:
                                 source.standby_data_valid);
          if(!input_available)
            {
-            SetRuntimeState(m_runtime[index],"RISK_STOP_REQUIRED",m_symbols[index],
-                            "Required symbol-level risk records are unavailable.");
+            const string final_state=ApplyHysteresis(
+               m_runtime[index],"SUSPENDED",m_symbols[index],
+               "Required symbol-level risk records are unavailable; new entries are suspended.");
+            snapshots[index].state=final_state;
+            snapshots[index].action="BLOCK_NEW_ENTRIES";
+            snapshots[index].is_risk_approved=false;
+            snapshots[index].are_new_entries_risk_approved=false;
+            snapshots[index].allocation_multiplier=0.0;
             snapshots[index].reason="Required symbol-level risk records are unavailable.";
+            snapshots[index].escalation_required=false;
             invalid_count++;
-            risk_stop_count++;
+            if(final_state=="SUSPENDED")
+               suspended_count++;
+            if(final_state=="RISK_STOP_REQUIRED")
+               risk_stop_count++;
             all_entries_allowed=false;
             all_data_valid=false;
             has_entry_block=true;
