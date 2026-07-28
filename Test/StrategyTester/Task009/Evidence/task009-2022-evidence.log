@@ -1,0 +1,49 @@
+﻿MO	0	21:59:59.650	Core 01	2022.01.12 22:30:40   [GaRXY FeNX][INFO] State transition: STANDBY -> RISK_STOP.
+EG	0	21:59:59.650	Core 01	2022.01.14 19:10:59   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+MH	0	21:59:59.650	Core 01	2022.01.18 12:00:20   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+DN	0	21:59:59.650	Core 01	2022.01.19 00:03:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+KE	0	22:01:00.693	Core 01	2022.03.22 13:38:40   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+CM	0	22:01:00.693	Core 01	2022.03.22 18:06:20   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+OG	0	22:01:06.797	Core 01	2022.03.28 13:29:40   [GaRXY FeNX][INFO] State transition: DYNAMIC_ZONE -> RISK_STOP.
+HF	0	22:01:06.797	Core 01	2022.03.28 19:01:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+LG	0	22:01:25.108	Core 01	2022.04.19 11:33:40   [GaRXY FeNX][INFO] State transition: DYNAMIC_ZONE -> RISK_STOP.
+LD	0	22:01:31.211	Core 01	2022.04.20 13:12:20   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+HD	0	22:01:37.314	Core 01	2022.04.28 12:27:40   [GaRXY FeNX][INFO] State transition: DYNAMIC_ZONE -> RISK_STOP.
+KK	0	22:01:37.314	Core 01	2022.04.29 00:43:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+GI	0	22:01:43.418	Core 01	2022.05.04 21:44:40   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+KP	0	22:01:43.418	Core 01	2022.05.06 00:21:00   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+NL	0	22:01:49.521	Core 01	2022.05.11 16:44:40   [GaRXY FeNX][INFO] State transition: STANDBY -> RISK_STOP.
+RS	0	22:01:49.521	Core 01	2022.05.12 03:10:20   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+MR	0	22:03:14.974	Core 01	2022.07.27 21:55:20   [GaRXY FeNX][INFO] State transition: STANDBY -> RISK_STOP.
+CP	0	22:03:14.974	Core 01	2022.07.28 00:29:30   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+MK	0	22:03:27.180	Core 01	2022.08.10 15:30:40   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+GN	0	22:03:33.284	Core 01	2022.08.15 10:01:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+KF	0	22:03:51.594	Core 01	2022.09.06 12:00:20   [GaRXY FeNX][INFO] State transition: STANDBY -> RISK_STOP.
+GQ	0	22:03:51.594	Core 01	2022.09.07 00:08:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+IJ	0	22:03:57.697	Core 01	2022.09.13 15:58:40   [GaRXY FeNX][INFO] State transition: STANDBY -> RISK_STOP.
+PD	0	22:03:57.697	Core 01	2022.09.14 13:32:20   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+CR	0	22:04:03.801	Core 01	2022.09.21 22:05:40   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+CP	0	22:04:09.905	Core 01	2022.09.23 00:33:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+IS	0	22:04:28.217	Core 01	2022.10.13 20:00:00   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+FK	0	22:04:28.217	Core 01	2022.10.17 01:08:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+JL	0	22:04:34.320	Core 01	2022.10.21 16:02:40   [GaRXY FeNX][INFO] State transition: DYNAMIC_ZONE -> RISK_STOP.
+GN	0	22:04:34.320	Core 01	2022.10.26 01:01:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+LG	0	22:04:52.632	Core 01	2022.11.10 16:26:40   [GaRXY FeNX][INFO] State transition: STANDBY -> RISK_STOP.
+GN	0	22:04:52.632	Core 01	2022.11.14 00:40:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+LP	0	22:04:58.737	Core 01	2022.11.23 17:45:40   [GaRXY FeNX][INFO] State transition: STANDBY -> RISK_STOP.
+QR	0	22:05:04.841	Core 01	2022.11.25 10:16:20   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+DH	0	22:05:17.049	Core 01	2022.12.13 15:30:40   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+DL	0	22:05:23.152	Core 01	2022.12.15 04:01:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+EE	0	22:05:23.152	Core 01	2022.12.20 06:00:00   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+PN	0	22:05:23.152	Core 01	2022.12.21 21:09:20   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+LJ	0	22:05:32.162	Core 01	2022.12.30 23:55:30   [GaRXY FeNX][INFO] [BACKTEST_METRICS] trades=148;wins=88;losses=60;win_rate=59.46;profit_factor=0.585784;net_profit=-142.95;balance_drawdown=147.65;balance_drawdown_percent=1.48;equity_drawdown=151.98;equity_drawdown_percent=1.52;average_holding_seconds=78268.52;closed_positions=148;sl_closes=42;tp_closes=2;expert_closes=104;other_closes=0
+MJ	0	22:05:32.162	Core 01	2022.12.30 23:55:30   [GaRXY FeNX][INFO] [BACKTEST_EXECUTION] updates=1479935;entry_signals=148;entry_blocks=0;no_signal_bars=1073;orders_requested=148;orders_accepted=148;orders_rejected=0;closes_requested=104;closes_accepted=104;closes_rejected=0;entry_retries=0;close_retries=0;position_open_events=148;position_close_events=148;minimum_volume_adjustments=43
+NE	0	22:05:32.162	Core 01	2022.12.30 23:55:30   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=Environment;blocked_ticks=512853;block_events=465
+GH	0	22:05:32.162	Core 01	2022.12.30 23:55:30   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=MarketSelection;blocked_ticks=4247;block_events=206
+DH	0	22:05:32.162	Core 01	2022.12.30 23:55:30   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=PairRanking;blocked_ticks=0;block_events=0
+PO	0	22:05:32.162	Core 01	2022.12.30 23:55:30   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=CapitalAllocation;blocked_ticks=0;block_events=0
+LS	0	22:05:32.162	Core 01	2022.12.30 23:55:30   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=TradingStyle;blocked_ticks=0;block_events=0
+EL	0	22:05:32.162	Core 01	2022.12.30 23:55:30   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=StrategySelection;blocked_ticks=0;block_events=0
+KP	0	22:05:32.162	Core 01	2022.12.30 23:55:30   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=Standby;blocked_ticks=0;block_events=0
+ML	0	22:05:32.162	Core 01	2022.12.30 23:55:30   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=Risk;blocked_ticks=214786;block_events=1007
+RQ	0	22:05:32.162	Core 01	2022.12.30 23:55:30   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=Execution;blocked_ticks=114;block_events=40

@@ -1,0 +1,31 @@
+﻿CO	0	22:26:59.238	Core 01	2025.01.10 15:30:40   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+DD	0	22:26:59.238	Core 01	2025.01.13 00:39:30   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+PS	0	22:28:24.689	Core 01	2025.04.03 00:52:00   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+LD	0	22:28:24.689	Core 01	2025.04.04 01:01:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+PM	0	22:28:43.000	Core 01	2025.04.21 03:30:40   [GaRXY FeNX][INFO] State transition: DYNAMIC_ZONE -> RISK_STOP.
+GL	0	22:28:43.000	Core 01	2025.04.22 17:01:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+NG	0	22:29:19.621	Core 01	2025.05.27 11:00:40   [GaRXY FeNX][INFO] State transition: DYNAMIC_ZONE -> RISK_STOP.
+DR	0	22:29:19.621	Core 01	2025.05.29 11:01:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+JG	0	22:30:08.449	Core 01	2025.07.16 19:07:40   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+OS	0	22:30:08.449	Core 01	2025.07.17 04:01:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+RQ	0	22:30:20.655	Core 01	2025.08.01 16:35:40   [GaRXY FeNX][INFO] State transition: STANDBY -> RISK_STOP.
+DM	0	22:30:20.655	Core 01	2025.08.04 18:01:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+GI	0	22:30:38.970	Core 01	2025.08.22 18:12:40   [GaRXY FeNX][INFO] State transition: STANDBY -> RISK_STOP.
+PK	0	22:30:38.970	Core 01	2025.08.26 06:01:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+GF	0	22:30:45.077	Core 01	2025.09.02 12:00:00   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+QS	0	22:30:45.077	Core 01	2025.09.02 22:01:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+EH	0	22:30:51.179	Core 01	2025.09.08 00:16:00   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+FR	0	22:30:51.179	Core 01	2025.09.08 08:22:20   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+LL	0	22:32:10.525	Core 01	2025.12.11 02:48:40   [GaRXY FeNX][INFO] State transition: STANDBY -> RISK_STOP.
+JJ	0	22:32:16.628	Core 01	2025.12.12 14:46:20   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+RE	0	22:32:29.299	Core 01	2025.12.30 23:58:59   [GaRXY FeNX][INFO] [BACKTEST_METRICS] trades=128;wins=83;losses=45;win_rate=64.84;profit_factor=0.785776;net_profit=-52.44;balance_drawdown=106.80;balance_drawdown_percent=1.06;equity_drawdown=112.30;equity_drawdown_percent=1.12;average_holding_seconds=68994.62;closed_positions=128;sl_closes=35;tp_closes=6;expert_closes=87;other_closes=0
+QF	0	22:32:29.299	Core 01	2025.12.30 23:58:59   [GaRXY FeNX][INFO] [BACKTEST_EXECUTION] updates=1463911;entry_signals=128;entry_blocks=0;no_signal_bars=1168;orders_requested=128;orders_accepted=128;orders_rejected=0;closes_requested=87;closes_accepted=87;closes_rejected=0;entry_retries=0;close_retries=0;position_open_events=128;position_close_events=128;minimum_volume_adjustments=38
+CI	0	22:32:29.299	Core 01	2025.12.30 23:58:59   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=Environment;blocked_ticks=646315;block_events=748
+QL	0	22:32:29.299	Core 01	2025.12.30 23:58:59   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=MarketSelection;blocked_ticks=4741;block_events=199
+PL	0	22:32:29.299	Core 01	2025.12.30 23:58:59   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=PairRanking;blocked_ticks=0;block_events=0
+DS	0	22:32:29.299	Core 01	2025.12.30 23:58:59   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=CapitalAllocation;blocked_ticks=0;block_events=0
+HO	0	22:32:29.299	Core 01	2025.12.30 23:58:59   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=TradingStyle;blocked_ticks=0;block_events=0
+QP	0	22:32:29.299	Core 01	2025.12.30 23:58:59   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=StrategySelection;blocked_ticks=0;block_events=0
+GD	0	22:32:29.299	Core 01	2025.12.30 23:58:59   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=Standby;blocked_ticks=0;block_events=0
+NH	0	22:32:29.299	Core 01	2025.12.30 23:58:59   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=Risk;blocked_ticks=167443;block_events=1016
+HE	0	22:32:29.299	Core 01	2025.12.30 23:58:59   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=Execution;blocked_ticks=4674;block_events=351

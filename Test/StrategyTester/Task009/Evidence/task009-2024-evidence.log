@@ -1,0 +1,57 @@
+﻿RH	0	22:20:32.787	Core 01	2024.01.05 18:00:00   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+FI	0	22:20:32.787	Core 01	2024.01.08 00:33:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+IH	0	22:20:51.100	Core 01	2024.01.23 10:17:40   [GaRXY FeNX][INFO] State transition: DYNAMIC_ZONE -> RISK_STOP.
+DR	0	22:20:51.100	Core 01	2024.01.24 01:01:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+HD	0	22:20:57.204	Core 01	2024.01.31 23:00:00   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+OH	0	22:20:57.204	Core 01	2024.02.01 01:01:59   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+MG	0	22:21:21.617	Core 01	2024.02.29 13:06:40   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+HL	0	22:21:21.617	Core 01	2024.02.29 20:01:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+MQ	0	22:21:39.927	Core 01	2024.03.27 12:21:40   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+QN	0	22:21:39.927	Core 01	2024.03.28 05:33:59   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+RD	0	22:21:52.135	Core 01	2024.04.10 20:00:00   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+JH	0	22:21:52.135	Core 01	2024.04.12 16:01:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+PR	0	22:22:04.343	Core 01	2024.04.29 07:32:40   [GaRXY FeNX][INFO] State transition: DYNAMIC_ZONE -> RISK_STOP.
+LG	0	22:22:10.447	Core 01	2024.05.02 17:01:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+IQ	0	22:22:22.654	Core 01	2024.05.15 21:00:00   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+LD	0	22:22:22.654	Core 01	2024.05.20 05:01:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+OE	0	22:22:47.072	Core 01	2024.06.12 21:36:20   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+QD	0	22:22:47.072	Core 01	2024.06.13 05:08:20   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+NG	0	22:22:53.176	Core 01	2024.06.14 15:34:40   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+JS	0	22:22:53.176	Core 01	2024.06.14 17:01:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+HP	0	22:22:53.176	Core 01	2024.06.14 17:50:40   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+FD	0	22:22:53.176	Core 01	2024.06.17 00:17:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+IQ	0	22:22:59.279	Core 01	2024.06.26 16:30:40   [GaRXY FeNX][INFO] State transition: DYNAMIC_ZONE -> RISK_STOP.
+LG	0	22:23:05.382	Core 01	2024.06.28 03:55:20   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+LP	0	22:23:11.486	Core 01	2024.07.05 15:30:40   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+JE	0	22:23:11.486	Core 01	2024.07.05 17:01:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+IJ	0	22:23:11.486	Core 01	2024.07.05 17:42:40   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+IN	0	22:23:11.486	Core 01	2024.07.08 00:36:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+DG	0	22:23:17.589	Core 01	2024.07.11 15:42:40   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+NN	0	22:23:17.589	Core 01	2024.07.16 04:03:20   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+PS	0	22:23:23.693	Core 01	2024.07.17 12:05:40   [GaRXY FeNX][INFO] State transition: DYNAMIC_ZONE -> RISK_STOP.
+KJ	0	22:23:23.693	Core 01	2024.07.18 00:01:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+QP	0	22:23:35.900	Core 01	2024.07.30 19:56:40   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+ND	0	22:23:35.900	Core 01	2024.07.31 06:01:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+EG	0	22:23:35.900	Core 01	2024.07.31 06:59:40   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+QS	0	22:23:35.900	Core 01	2024.07.31 16:01:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+PH	0	22:24:18.625	Core 01	2024.09.06 17:12:40   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+IO	0	22:24:18.625	Core 01	2024.09.06 23:05:20   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+CK	0	22:24:36.936	Core 01	2024.09.27 10:49:40   [GaRXY FeNX][INFO] State transition: STANDBY -> RISK_STOP.
+CE	0	22:24:36.936	Core 01	2024.10.01 01:01:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+LM	0	22:24:49.143	Core 01	2024.10.10 16:04:40   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+CJ	0	22:24:49.143	Core 01	2024.10.11 02:01:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+OL	0	22:25:13.559	Core 01	2024.11.06 03:00:00   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+JJ	0	22:25:13.559	Core 01	2024.11.08 02:39:20   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+MG	0	22:25:37.975	Core 01	2024.12.11 16:18:40   [GaRXY FeNX][INFO] State transition: NORMAL -> RISK_STOP.
+KL	0	22:25:37.975	Core 01	2024.12.12 00:29:40   [GaRXY FeNX][INFO] State transition: RISK_STOP -> STANDBY.
+CM	0	22:25:49.684	Core 01	2024.12.30 23:59:59   [GaRXY FeNX][INFO] [BACKTEST_METRICS] trades=144;wins=111;losses=33;win_rate=77.08;profit_factor=1.372968;net_profit=64.24;balance_drawdown=20.74;balance_drawdown_percent=0.21;equity_drawdown=24.41;equity_drawdown_percent=0.24;average_holding_seconds=72593.83;closed_positions=143;sl_closes=24;tp_closes=7;expert_closes=112;other_closes=0
+IK	0	22:25:49.684	Core 01	2024.12.30 23:59:59   [GaRXY FeNX][INFO] [BACKTEST_EXECUTION] updates=1466584;entry_signals=144;entry_blocks=0;no_signal_bars=946;orders_requested=144;orders_accepted=144;orders_rejected=0;closes_requested=112;closes_accepted=112;closes_rejected=0;entry_retries=0;close_retries=0;position_open_events=144;position_close_events=143;minimum_volume_adjustments=35
+JG	0	22:25:49.684	Core 01	2024.12.30 23:59:59   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=Environment;blocked_ticks=594338;block_events=603
+JF	0	22:25:49.684	Core 01	2024.12.30 23:59:59   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=MarketSelection;blocked_ticks=4773;block_events=245
+JJ	0	22:25:49.684	Core 01	2024.12.30 23:59:59   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=PairRanking;blocked_ticks=0;block_events=0
+RI	0	22:25:49.684	Core 01	2024.12.30 23:59:59   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=CapitalAllocation;blocked_ticks=0;block_events=0
+RQ	0	22:25:49.684	Core 01	2024.12.30 23:59:59   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=TradingStyle;blocked_ticks=0;block_events=0
+GN	0	22:25:49.684	Core 01	2024.12.30 23:59:59   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=StrategySelection;blocked_ticks=0;block_events=0
+MN	0	22:25:49.684	Core 01	2024.12.30 23:59:59   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=Standby;blocked_ticks=0;block_events=0
+MM	0	22:25:49.684	Core 01	2024.12.30 23:59:59   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=Risk;blocked_ticks=215624;block_events=989
+PS	0	22:25:49.684	Core 01	2024.12.30 23:59:59   [GaRXY FeNX][INFO] [BACKTEST_PIPELINE] stage=Execution;blocked_ticks=1730;block_events=210
