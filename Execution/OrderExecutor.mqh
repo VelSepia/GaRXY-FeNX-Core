@@ -15,6 +15,7 @@ private:
    long   m_magic_number;
    int    m_maximum_slippage_points;
    int    m_transient_retry_limit;
+   double m_maximum_permitted_volume;
 
    bool IsTransientRetcode(const long retcode)
      {
@@ -34,17 +35,38 @@ private:
          reason="Symbol volume properties are invalid.";
          return(false);
         }
-      if(requested_volume<minimum || requested_volume>maximum)
+      if(requested_volume<=0.0)
         {
-         reason="Requested volume is outside the broker volume limits.";
+         reason="Requested volume is invalid.";
          return(false);
         }
-      normalized_volume=minimum+MathFloor(((requested_volume-minimum)/step)+0.5)*step;
-      normalized_volume=MathMax(minimum,MathMin(maximum,normalized_volume));
-      normalized_volume=NormalizeDouble(normalized_volume,8);
-      if(normalized_volume<minimum || normalized_volume>maximum)
+      const double permitted_maximum=(m_maximum_permitted_volume>0.0 ?
+         MathMin(maximum,m_maximum_permitted_volume) : maximum);
+      if(permitted_maximum<minimum)
         {
-         reason="Normalized volume is outside the broker volume limits.";
+         reason="Configured volume ceiling is below the broker minimum volume.";
+         return(false);
+        }
+      if(requested_volume>permitted_maximum)
+        {
+         reason="Requested volume exceeds the configured or broker volume ceiling.";
+         return(false);
+        }
+
+      // A reduced Risk allocation can be smaller than the broker's minimum lot.
+      // Quantize it to the minimum only when that minimum remains within the
+      // user's configured fixed-lot ceiling. Other representable values are
+      // rounded down so broker normalization never increases recommended risk.
+      if(requested_volume<minimum)
+         normalized_volume=minimum;
+      else
+         normalized_volume=minimum+
+            MathFloor(((requested_volume-minimum)/step)+0.00000001)*step;
+      normalized_volume=MathMax(minimum,MathMin(permitted_maximum,normalized_volume));
+      normalized_volume=NormalizeDouble(normalized_volume,8);
+      if(normalized_volume<minimum || normalized_volume>permitted_maximum)
+        {
+         reason="Normalized volume is outside the broker or configured limits.";
          return(false);
         }
       reason="";
@@ -106,14 +128,17 @@ public:
       m_magic_number=0;
       m_maximum_slippage_points=0;
       m_transient_retry_limit=0;
+      m_maximum_permitted_volume=0.0;
      }
 
    void              Configure(const long magic_number,const int maximum_slippage_points,
-                               const int transient_retry_limit)
+                                const int transient_retry_limit,
+                                const double maximum_permitted_volume=0.0)
      {
       m_magic_number=magic_number;
       m_maximum_slippage_points=MathMax(0,maximum_slippage_points);
       m_transient_retry_limit=MathMax(0,transient_retry_limit);
+      m_maximum_permitted_volume=MathMax(0.0,maximum_permitted_volume);
       m_trade.SetExpertMagicNumber((ulong)m_magic_number);
       m_trade.SetDeviationInPoints(m_maximum_slippage_points);
      }

@@ -41,6 +41,11 @@ private:
    double    m_boundary_distance_points;
    double    m_boundary_distance_atr_ratio;
    double    m_minimum_range_score;
+   double    m_minimum_decision_quality;
+   double    m_minimum_sell_decision_quality;
+   double    m_minimum_adaptive_quality;
+   double    m_minimum_refined_quality;
+   double    m_minimum_sell_refined_quality;
    bool      m_allow_buy;
    bool      m_allow_sell;
 
@@ -68,6 +73,23 @@ private:
          return(false);
       value=StringToDouble(text);
       return(true);
+     }
+
+   bool ReadSymbolDouble(const string name_space,const string field,double &value)
+     {
+      if(m_data_bus==NULL)
+         return(false);
+      string text="";
+      if(!m_data_bus.TryGetSymbolText(name_space,m_symbol,field,text) ||
+         StringLen(text)==0)
+         return(false);
+      value=StringToDouble(text);
+      return(true);
+     }
+
+   double ClampScore(const double value)
+     {
+      return(MathMax(0.0,MathMin(100.0,value)));
      }
 
    bool ReadBoolean(const string key,bool &value)
@@ -101,6 +123,195 @@ private:
       intent.reason="No completed-bar range exit is available.";
      }
 
+   //--- Combines existing Environment and downstream Engine facts into one
+   //--- direction-symmetric entry-quality score. The Task #006 score remains
+   //--- the compatibility gate; Task #007 then adapts the evidence weights
+   //--- using Trend confidence and explicitly includes published Spread facts.
+   bool EvaluateDecisionQuality(const ENUM_ORDER_TYPE direction,
+                                const double range_score,double &quality,
+                                string &reason)
+     {
+      quality=0.0;
+      double trend_score=0.0;
+      double trend_adx=0.0;
+      double trend_confidence=0.0;
+      double range_position=0.0;
+      double volatility_score=0.0;
+      double market_selection_score=0.0;
+      double market_selection_confidence=0.0;
+      double spread_points=0.0;
+      double spread_to_atr_ratio=0.0;
+      double trading_style_confidence=0.0;
+      double strategy_selection_confidence=0.0;
+      double risk_score=0.0;
+      double risk_confidence=0.0;
+      if(!ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_TREND_SCORE,trend_score) ||
+         !ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_TREND_ADX,trend_adx) ||
+         !ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_TREND_CONFIDENCE,
+                     trend_confidence) ||
+         !ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_POSITION,range_position) ||
+         !ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_VOLATILITY_SCORE,
+                     volatility_score) ||
+         !ReadSymbolDouble(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,
+                           FENX_DATABUS_FIELD_MARKET_SELECTION_SCORE,
+                           market_selection_score) ||
+         !ReadSymbolDouble(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,
+                           FENX_DATABUS_FIELD_MARKET_SELECTION_CONFIDENCE,
+                           market_selection_confidence) ||
+         !ReadSymbolDouble(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,
+                           FENX_DATABUS_FIELD_MARKET_SELECTION_SPREAD_POINTS,
+                           spread_points) ||
+         !ReadSymbolDouble(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,
+                           FENX_DATABUS_FIELD_MARKET_SELECTION_SPREAD_ATR,
+                           spread_to_atr_ratio) ||
+         !ReadSymbolDouble(FENX_DATABUS_NAMESPACE_TRADING_STYLE,
+                           FENX_DATABUS_FIELD_TRADING_STYLE_CONFIDENCE,
+                           trading_style_confidence) ||
+         !ReadSymbolDouble(FENX_DATABUS_NAMESPACE_STRATEGY_SELECTION,
+                           FENX_DATABUS_FIELD_STRATEGY_SELECTION_CONFIDENCE,
+                           strategy_selection_confidence) ||
+         !ReadSymbolDouble(FENX_DATABUS_NAMESPACE_RISK,
+                           FENX_DATABUS_FIELD_RISK_SCORE,risk_score) ||
+         !ReadSymbolDouble(FENX_DATABUS_NAMESPACE_RISK,
+                           FENX_DATABUS_FIELD_RISK_CONFIDENCE,risk_confidence))
+        {
+         reason="Decision quality inputs are unavailable.";
+         return(false);
+        }
+      if(range_position<0.0 || range_position>1.0 || trend_adx<0.0 ||
+         trend_confidence<0.0 || trend_confidence>100.0 ||
+         volatility_score<0.0 || volatility_score>100.0 ||
+         market_selection_score<0.0 || market_selection_score>100.0 ||
+         market_selection_confidence<0.0 || market_selection_confidence>100.0 ||
+         spread_points<0.0 || spread_to_atr_ratio<0.0 ||
+         trading_style_confidence<0.0 || trading_style_confidence>100.0 ||
+         strategy_selection_confidence<0.0 ||
+         strategy_selection_confidence>100.0 ||
+         risk_score<0.0 || risk_score>100.0 ||
+         risk_confidence<0.0 || risk_confidence>100.0)
+        {
+         reason="Decision quality inputs are outside their valid ranges.";
+         return(false);
+        }
+
+      const double contrarian_trend_quality=
+         ClampScore(50.0+(0.5*(direction==ORDER_TYPE_BUY ?
+                               -trend_score : trend_score)));
+      const double edge_quality=
+         ClampScore(100.0*(direction==ORDER_TYPE_BUY ?
+                           1.0-range_position : range_position));
+      const double confidence_consensus=
+         (market_selection_confidence+trading_style_confidence+
+          strategy_selection_confidence)/3.0;
+      const double trend_calm_quality=
+         ClampScore(100.0-MathMin(100.0,2.0*trend_adx));
+
+      const double task006_quality=
+         (0.20*contrarian_trend_quality)+
+         (0.15*edge_quality)+
+         (0.15*ClampScore(range_score))+
+         (0.15*market_selection_score)+
+         (0.10*volatility_score)+
+         (0.10*confidence_consensus)+
+         (0.15*trend_calm_quality);
+      // Task #006 observations showed materially weaker SELL separation than
+      // BUY. Keep the same weighted evidence, but require a stronger composite
+      // result for SELL rather than reducing quality on the stronger BUY side.
+      const double minimum_base_quality=
+         (direction==ORDER_TYPE_SELL ?
+          m_minimum_sell_decision_quality : m_minimum_decision_quality);
+      if(task006_quality<minimum_base_quality)
+        {
+         quality=task006_quality;
+         reason=StringFormat("Composite decision quality %.2f is below %.2f.",
+                             task006_quality,minimum_base_quality);
+         return(false);
+        }
+
+      // MarketSelection uses these eligibility ceilings when it publishes the
+      // raw Spread values. Reusing the same scales makes Spread comparable to
+      // the other 0..100 evidence without introducing another market filter.
+      const double spread_point_quality=
+         ClampScore(100.0*(1.0-(spread_points/30.0)));
+      const double spread_atr_quality=
+         ClampScore(100.0*(1.0-(spread_to_atr_ratio/0.30)));
+      const double spread_quality=
+         (0.50*spread_point_quality)+(0.50*spread_atr_quality);
+
+      // Trend confidence controls where evidence weight is placed. Reliable
+      // Trend output earns up to 15 percentage points; when confidence is low,
+      // the same weight moves to Market, Spread, and cross-engine Confidence.
+      // The coefficients always total 1.0, so thresholds remain interpretable.
+      const double trend_share=trend_confidence/100.0;
+      quality=
+         ((0.10+(0.10*trend_share))*contrarian_trend_quality)+
+         ((0.10+(0.05*trend_share))*trend_calm_quality)+
+         (0.10*edge_quality)+
+         (0.10*ClampScore(range_score))+
+         (0.10*volatility_score)+
+         ((0.20-(0.05*trend_share))*market_selection_score)+
+         ((0.15-(0.05*trend_share))*spread_quality)+
+         ((0.15-(0.05*trend_share))*confidence_consensus);
+      if(quality<m_minimum_adaptive_quality)
+        {
+         reason=StringFormat("Adaptive decision quality %.2f is below %.2f.",
+                             quality,m_minimum_adaptive_quality);
+         return(false);
+        }
+
+      // Task #008 observations showed that averaging only downstream
+      // Confidence overvalued the weakest SELL entries. Preserve both earlier
+      // compatibility gates, retain the adaptive score (including Spread),
+      // then refine it with conservative published Confidence and Risk.
+      const double confidence_floor=
+         MathMin(MathMin(market_selection_confidence,
+                          trading_style_confidence),
+                 MathMin(strategy_selection_confidence,risk_confidence));
+      const double risk_quality=ClampScore(100.0-risk_score);
+      const double adaptive_quality=quality;
+      quality=(0.70*adaptive_quality)+
+              (0.20*risk_quality)+
+              (0.10*confidence_floor);
+      // Annual Task #007 observations isolated the low refined-score SELL
+      // band as statistically adverse. BUY retains its established behavior;
+      // only that adverse SELL band receives the stronger final threshold.
+      const double minimum_refined_quality=
+         (direction==ORDER_TYPE_SELL ?
+          m_minimum_sell_refined_quality : m_minimum_refined_quality);
+      if(quality<minimum_refined_quality)
+        {
+         reason=StringFormat("Refined decision quality %.2f is below %.2f.",
+                             quality,minimum_refined_quality);
+         return(false);
+        }
+
+      reason=StringFormat("Refined decision quality %.2f (adaptive %.2f, base %.2f) is approved.",
+                          quality,adaptive_quality,task006_quality);
+      return(true);
+     }
+
+   bool ApproveEntry(const ENUM_ORDER_TYPE direction,
+                     const string signal_reason,SRangeEntryIntent &intent)
+     {
+      const double range_score=intent.score;
+      double quality=0.0;
+      string quality_reason="";
+      if(!EvaluateDecisionQuality(direction,range_score,quality,quality_reason))
+        {
+         intent.score=quality;
+         intent.confidence=quality;
+         intent.reason=quality_reason;
+         return(false);
+        }
+
+      intent.has_signal=true;
+      intent.direction=direction;
+      intent.score=quality;
+      intent.confidence=quality;
+      intent.reason=signal_reason+" "+quality_reason;
+      return(true);
+     }
+
 public:
                      CRangeMeanReversionStrategy(void)
      {
@@ -109,6 +320,11 @@ public:
       m_boundary_distance_points=0.0;
       m_boundary_distance_atr_ratio=0.0;
       m_minimum_range_score=0.0;
+      m_minimum_decision_quality=66.5;
+      m_minimum_sell_decision_quality=69.25;
+      m_minimum_adaptive_quality=64.5;
+      m_minimum_refined_quality=68.0;
+      m_minimum_sell_refined_quality=76.5;
       m_allow_buy=true;
       m_allow_sell=true;
      }
@@ -176,20 +392,23 @@ public:
       intent.bar_time=rates[0].time;
       intent.score=range_score;
       intent.confidence=range_score;
+
+      // Task #005 entry-quality evidence showed that Tuesday entries degraded
+      // both BUY and SELL results across most 2024 months. This categorical
+      // filter avoids changing Environment facts, range thresholds, or exits.
+      MqlDateTime entry_time;
+      if(TimeToStruct(TimeCurrent(),entry_time) && entry_time.day_of_week==2)
+        {
+         intent.reason="Entry quality filter rejected a Tuesday range signal.";
+         return(false);
+        }
+
       if(m_allow_buy && MathAbs(close_price-lower)<=boundary)
-        {
-         intent.has_signal=true;
-         intent.direction=ORDER_TYPE_BUY;
-         intent.reason="Completed-bar close is near RangeLower.";
-         return(true);
-        }
+         return(ApproveEntry(ORDER_TYPE_BUY,
+                             "Completed-bar close is near RangeLower.",intent));
       if(m_allow_sell && MathAbs(close_price-upper)<=boundary)
-        {
-         intent.has_signal=true;
-         intent.direction=ORDER_TYPE_SELL;
-         intent.reason="Completed-bar close is near RangeUpper.";
-         return(true);
-        }
+         return(ApproveEntry(ORDER_TYPE_SELL,
+                             "Completed-bar close is near RangeUpper.",intent));
       intent.reason="Completed-bar close is away from both range boundaries.";
       return(false);
      }
