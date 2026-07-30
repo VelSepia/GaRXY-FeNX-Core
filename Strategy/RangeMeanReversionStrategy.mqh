@@ -5,6 +5,7 @@
 #define FENX_RANGE_MEAN_REVERSION_STRATEGY_MQH
 
 #include "../Common/Constants.mqh"
+#include "../Common/Logger.mqh"
 #include "../Core/DataBus.mqh"
 
 //--- Completed-bar entry intent. It contains no execution behavior.
@@ -48,6 +49,8 @@ private:
    double    m_minimum_sell_refined_quality;
    bool      m_allow_buy;
    bool      m_allow_sell;
+   long      m_c3_block_count;
+   datetime  m_c3_last_block_bar_time;
 
    bool ReadBooleanText(const string text,bool &value)
      {
@@ -290,6 +293,42 @@ private:
       return(true);
      }
 
+   //--- Official Task015 Lite C3 filter. Only a SELL signal can be rejected,
+   //--- and only when the existing Environment output reports a neutral trend
+   //--- with ADX inside the frozen inclusive range [20.000, 25.945].
+   //--- Missing inputs preserve Task008 behavior for backward compatibility.
+   bool PassesTask015C3SellFilter(const datetime signal_bar_time,string &reason)
+     {
+      double trend_adx=0.0;
+      string trend_direction="";
+      if(!ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_TREND_ADX,trend_adx) ||
+         m_data_bus==NULL ||
+         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_TREND_DIRECTION,
+                                trend_direction) ||
+         StringLen(trend_direction)==0)
+         return(true);
+
+      if(trend_direction!="NEUTRAL" ||
+         trend_adx<20.000 || trend_adx>25.945)
+         return(true);
+
+      reason="C3_SELL_NEUTRAL_ADX";
+      // Evaluate can be called more than once for the same completed bar.
+      // Count and journal each blocked signal bar once without altering the
+      // rejection result on subsequent calls.
+      if(signal_bar_time!=m_c3_last_block_bar_time)
+        {
+         m_c3_last_block_bar_time=signal_bar_time;
+         m_c3_block_count++;
+         CLogger::Info(StringFormat(
+            "[ENTRY BLOCK] DateTime=%s;Symbol=%s;Direction=SELL;"
+            "Trend=%s;ADX=%.3f;Reason=%s;C3BlockCount=%I64d",
+            TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS),
+            m_symbol,trend_direction,trend_adx,reason,m_c3_block_count));
+        }
+      return(false);
+     }
+
    bool ApproveEntry(const ENUM_ORDER_TYPE direction,
                      const string signal_reason,SRangeEntryIntent &intent)
      {
@@ -327,6 +366,8 @@ public:
       m_minimum_sell_refined_quality=76.5;
       m_allow_buy=true;
       m_allow_sell=true;
+      m_c3_block_count=0;
+      m_c3_last_block_bar_time=0;
      }
 
    void              Configure(CDataBus &data_bus,const string symbol,
@@ -342,6 +383,8 @@ public:
       m_minimum_range_score=minimum_range_score;
       m_allow_buy=allow_buy;
       m_allow_sell=allow_sell;
+      m_c3_block_count=0;
+      m_c3_last_block_bar_time=0;
      }
 
    bool              Evaluate(SRangeEntryIntent &intent)
@@ -407,8 +450,16 @@ public:
          return(ApproveEntry(ORDER_TYPE_BUY,
                              "Completed-bar close is near RangeLower.",intent));
       if(m_allow_sell && MathAbs(close_price-upper)<=boundary)
+        {
+         string filter_reason="";
+         if(!PassesTask015C3SellFilter(intent.bar_time,filter_reason))
+           {
+            intent.reason=filter_reason;
+            return(false);
+           }
          return(ApproveEntry(ORDER_TYPE_SELL,
                              "Completed-bar close is near RangeUpper.",intent));
+        }
       intent.reason="Completed-bar close is away from both range boundaries.";
       return(false);
      }
