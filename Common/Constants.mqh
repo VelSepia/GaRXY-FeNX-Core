@@ -7,9 +7,15 @@
 //--- Framework identifiers and conservative Phase3-1 limits
 #define FENX_EA_NAME           "GaRXY FeNX"
 #define FENX_MAX_ENGINES       32
-#define FENX_DATABUS_CAPACITY  336
-#define FENX_MARKET_SELECTION_MAX_SYMBOLS 4
+#define FENX_DATABUS_CAPACITY  1024
+#define FENX_MARKET_SELECTION_MAX_SYMBOLS 5
 #define FENX_PAIR_RANKING_COMPARE_EPSILON 0.0001
+
+//--- Startup capacity model audited in Phase4-Core Task003.
+//--- Execution publishes one current-symbol snapshot outside the configured
+//--- market list, so its eighteen fields are included in the fixed component.
+#define FENX_DATABUS_BASELINE_FIXED_ENTRIES       89
+#define FENX_DATABUS_BASELINE_PER_SYMBOL_ENTRIES  59
 
 //--- Environment Engine DataBus keys
 #define FENX_DATABUS_KEY_ENVIRONMENT_ATR               "Environment.Volatility.ATR"
@@ -45,6 +51,43 @@
 #define FENX_DATABUS_KEY_ENVIRONMENT_RECOMMENDED_STYLE    "Environment.Market.RecommendedTradingStyle"
 #define FENX_DATABUS_KEY_ENVIRONMENT_RECOMMENDED_RISK     "Environment.Market.RecommendedRiskLevel"
 #define FENX_DATABUS_KEY_ENVIRONMENT_MARKET_UPDATED_AT    "Environment.Market.UpdatedAt"
+
+//--- Shadow-only Common Environment snapshot contract
+#define FENX_COMMON_ENVIRONMENT_SNAPSHOT_VERSION                  "1.0"
+#define FENX_COMMON_ENVIRONMENT_KEY_COUNT                         32
+#define FENX_DATABUS_NAMESPACE_COMMON_ENVIRONMENT                 "CommonEnvironment"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_VALID               "Valid"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_FRESH               "Fresh"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_VERSION             "Version"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_UPDATED_AT          "UpdatedAt"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_INVALID_REASON      "InvalidReason"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_SYMBOL              "Symbol"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_TIMEFRAME           "Timeframe"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_VOLATILITY_VALID    "VolatilityValid"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RANGE_VALID         "RangeValid"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_TREND_VALID         "TrendValid"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_MARKET_STATE_VALID  "MarketStateValid"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_ATR                 "ATR"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_VOLATILITY_SCORE    "VolatilityScore"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_VOLATILITY_LEVEL    "VolatilityLevel"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RANGE_UPPER         "RangeUpper"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RANGE_LOWER         "RangeLower"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RANGE_MIDPOINT      "RangeMidpoint"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RANGE_WIDTH_POINTS  "RangeWidthPoints"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RANGE_POSITION      "RangePosition"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RANGE_SCORE         "RangeScore"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_IS_RANGE            "IsRange"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_TREND_DIRECTION     "TrendDirection"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_TREND_STRENGTH      "TrendStrength"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_TREND_SCORE         "TrendScore"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_TREND_SLOPE         "TrendSlope"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_TREND_CONFIDENCE    "TrendConfidence"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_ADX                 "ADX"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_IS_TREND            "IsTrend"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_MARKET_STATE        "MarketState"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_MARKET_CONFIDENCE   "MarketConfidence"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RECOMMENDED_STYLE   "RecommendedStyle"
+#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RECOMMENDED_RISK    "RecommendedRisk"
 
 //--- Per-symbol Market Selection DataBus namespace and field names
 #define FENX_DATABUS_NAMESPACE_MARKET_SELECTION           "MarketSelection"

@@ -46,7 +46,7 @@ public:
       if(index<0)
         {
          const int item_count=ArraySize(m_items);
-         if(item_count>=FENX_DATABUS_CAPACITY)
+         if(item_count>=Capacity())
            {
             CLogger::Error("DataBus capacity has been reached.");
             return(false);
@@ -105,9 +105,40 @@ public:
       return(FindIndex(key)>=0);
      }
 
-   int Count(void)
+   //--- Returns the logical safety guard. The dynamic array is not pre-sized.
+   int Capacity(void)
+     {
+      return(FENX_DATABUS_CAPACITY);
+     }
+
+   //--- Returns only entries currently stored in the dynamic array.
+   int CurrentSize(void)
      {
       return(ArraySize(m_items));
+     }
+
+   //--- Returns the number of additional unique keys that can be accepted.
+   int RemainingCapacity(void)
+     {
+      const int remaining=Capacity()-CurrentSize();
+      return(remaining>0 ? remaining : 0);
+     }
+
+   //--- Tests an additional unique-key reservation without allocating memory.
+   bool CanReserve(const int required_entries)
+     {
+      return(required_entries>=0 && required_entries<=RemainingCapacity());
+     }
+
+   //--- Compatibility-friendly alias for capacity planning callers.
+   bool HasCapacityFor(const int required_entries)
+     {
+      return(CanReserve(required_entries));
+     }
+
+   int Count(void)
+     {
+      return(CurrentSize());
      }
 
    void Clear(void)

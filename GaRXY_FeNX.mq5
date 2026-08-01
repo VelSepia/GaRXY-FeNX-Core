@@ -7,7 +7,10 @@
 #property strict
 
 #include "Core/CoreController.mqh"
+#include "Core/DataBusCapacityPlan.mqh"
+#include "Common/CommonSnapshotStore.mqh"
 #include "Environment/MarketStateIntegrator.mqh"
+#include "Environment/EnvironmentEngine.mqh"
 #include "Environment/RangeDetector.mqh"
 #include "Environment/TrendDetector.mqh"
 #include "Environment/VolatilityAnalyzer.mqh"
@@ -48,10 +51,12 @@ input string InpExecutionTradeComment               = "GaRXY_FeNX_Core_v1";
 //--- Framework-wide services
 CParameterManager g_parameters;
 CCoreController   g_controller;
+CCommonSnapshotStore g_common_snapshot_store;
 CVolatilityAnalyzer g_volatility_analyzer;
 CRangeDetector      g_range_detector;
 CTrendDetector      g_trend_detector;
 CMarketStateIntegrator g_market_state_integrator;
+CEnvironmentEngine     g_environment_engine;
 CMarketSelectionEngine g_market_selection_engine;
 CPairRankingEngine     g_pair_ranking_engine;
 CCapitalAllocationEngine g_capital_allocation_engine;
@@ -94,6 +99,21 @@ int OnInit()
       return(INIT_FAILED);
      }
 
+   CDataBusCapacityPlan capacity_plan;
+   if(!capacity_plan.Build(g_parameters.MarketSelectionSymbolCount(),
+                           FENX_COMMON_ENVIRONMENT_KEY_COUNT) ||
+      !capacity_plan.Validate(g_controller.DataBus()))
+     {
+      CLogger::Error("Unable to satisfy the startup DataBus capacity plan.");
+      return(INIT_FAILED);
+     }
+
+   if(!g_environment_engine.SetSnapshotStore(g_common_snapshot_store))
+     {
+      CLogger::Error("Unable to attach CommonSnapshotStore to EnvironmentEngine.");
+      return(INIT_FAILED);
+     }
+
    if(!g_controller.RegisterEngine(g_volatility_analyzer))
      {
       CLogger::Error("Unable to register VolatilityAnalyzer.");
@@ -115,6 +135,12 @@ int OnInit()
    if(!g_controller.RegisterEngine(g_market_state_integrator))
      {
       CLogger::Error("Unable to register MarketStateIntegrator.");
+      return(INIT_FAILED);
+     }
+
+   if(!g_controller.RegisterEngine(g_environment_engine))
+     {
+      CLogger::Error("Unable to register EnvironmentEngine.");
       return(INIT_FAILED);
      }
 
@@ -178,6 +204,7 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    g_controller.Shutdown();
+   g_common_snapshot_store.Clear();
   }
 
 //+------------------------------------------------------------------+
