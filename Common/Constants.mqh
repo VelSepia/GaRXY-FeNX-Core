@@ -89,6 +89,26 @@
 #define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RECOMMENDED_STYLE   "RecommendedStyle"
 #define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RECOMMENDED_RISK    "RecommendedRisk"
 
+//--- Shadow-only Common Confidence summary contract. Detailed source facts
+//--- remain in CCommonSnapshotStore; DataBus receives only bounded summaries.
+#define FENX_COMMON_CONFIDENCE_SNAPSHOT_VERSION                   "1.0"
+#define FENX_COMMON_CONFIDENCE_EXPECTED_SOURCE_COUNT              8
+#define FENX_COMMON_CONFIDENCE_GLOBAL_KEY_COUNT                   0
+#define FENX_COMMON_CONFIDENCE_PER_SYMBOL_KEY_COUNT               12
+#define FENX_DATABUS_NAMESPACE_COMMON_CONFIDENCE                  "CommonConfidence"
+#define FENX_DATABUS_FIELD_COMMON_CONFIDENCE_VALID                "Valid"
+#define FENX_DATABUS_FIELD_COMMON_CONFIDENCE_FRESH                "Fresh"
+#define FENX_DATABUS_FIELD_COMMON_CONFIDENCE_VERSION              "Version"
+#define FENX_DATABUS_FIELD_COMMON_CONFIDENCE_UPDATED_AT           "UpdatedAt"
+#define FENX_DATABUS_FIELD_COMMON_CONFIDENCE_AVERAGE              "Average"
+#define FENX_DATABUS_FIELD_COMMON_CONFIDENCE_MINIMUM              "Minimum"
+#define FENX_DATABUS_FIELD_COMMON_CONFIDENCE_MAXIMUM              "Maximum"
+#define FENX_DATABUS_FIELD_COMMON_CONFIDENCE_VARIANCE             "Variance"
+#define FENX_DATABUS_FIELD_COMMON_CONFIDENCE_COMPLETENESS         "Completeness"
+#define FENX_DATABUS_FIELD_COMMON_CONFIDENCE_VALID_SOURCE_COUNT   "ValidSourceCount"
+#define FENX_DATABUS_FIELD_COMMON_CONFIDENCE_MISSING_SOURCE_COUNT "MissingSourceCount"
+#define FENX_DATABUS_FIELD_COMMON_CONFIDENCE_BOTTLENECK_STAGE     "BottleneckStage"
+
 //--- Per-symbol Market Selection DataBus namespace and field names
 #define FENX_DATABUS_NAMESPACE_MARKET_SELECTION           "MarketSelection"
 #define FENX_DATABUS_FIELD_MARKET_SELECTION_SYMBOL        "Symbol"

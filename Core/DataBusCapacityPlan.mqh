@@ -16,6 +16,9 @@ private:
    int m_configured_symbol_count;
    int m_baseline_required_entries;
    int m_environment_required_entries;
+   int m_additional_global_entries;
+   int m_additional_per_symbol_entries;
+   int m_additional_required_entries;
    int m_total_required_entries;
 
 public:
@@ -24,15 +27,21 @@ public:
       m_configured_symbol_count=0;
       m_baseline_required_entries=0;
       m_environment_required_entries=0;
+      m_additional_global_entries=0;
+      m_additional_per_symbol_entries=0;
+      m_additional_required_entries=0;
       m_total_required_entries=0;
      }
 
    bool              Build(const int configured_symbol_count,
-                           const int environment_required_entries)
+                           const int environment_required_entries,
+                           const int additional_global_entries=0,
+                           const int additional_per_symbol_entries=0)
      {
       if(configured_symbol_count<1 ||
          configured_symbol_count>FENX_MARKET_SELECTION_MAX_SYMBOLS ||
-         environment_required_entries<0)
+         environment_required_entries<0 || additional_global_entries<0 ||
+         additional_per_symbol_entries<0)
         {
          CLogger::Error("DataBus startup capacity plan received invalid inputs.");
          return(false);
@@ -43,8 +52,13 @@ public:
          FENX_DATABUS_BASELINE_FIXED_ENTRIES+
          FENX_DATABUS_BASELINE_PER_SYMBOL_ENTRIES*configured_symbol_count;
       m_environment_required_entries=environment_required_entries;
+      m_additional_global_entries=additional_global_entries;
+      m_additional_per_symbol_entries=additional_per_symbol_entries;
+      m_additional_required_entries=additional_global_entries+
+                                    additional_per_symbol_entries*configured_symbol_count;
       m_total_required_entries=m_baseline_required_entries+
-                               m_environment_required_entries;
+                               m_environment_required_entries+
+                               m_additional_required_entries;
       return(true);
      }
 
@@ -73,10 +87,12 @@ public:
       const bool accepted=data_bus.HasCapacityFor(m_total_required_entries);
 
       CLogger::Info(StringFormat(
-         "[DATABUS CAPACITY] Configured Symbols: %d; Baseline Required Keys: %d; Environment Required Keys: %d; Total Required Keys: %d; Capacity: %d; Remaining: %d; Remaining Ratio: %.1f%%; Capacity Check: %s",
+         "[DATABUS CAPACITY] Configured Symbols: %d; Baseline Required Keys: %d; Environment Required Keys: %d; Additional Global Keys: %d; Additional Per-Symbol Keys: %d; Additional Required Keys: %d; Total Required Keys: %d; Capacity: %d; Remaining: %d; Remaining Ratio: %.1f%%; Capacity Check: %s",
          m_configured_symbol_count,m_baseline_required_entries,
-         m_environment_required_entries,m_total_required_entries,capacity,
-         remaining,remaining_percentage,(accepted ? "PASS" : "FAIL")));
+         m_environment_required_entries,m_additional_global_entries,
+         m_additional_per_symbol_entries,m_additional_required_entries,
+         m_total_required_entries,capacity,remaining,remaining_percentage,
+         (accepted ? "PASS" : "FAIL")));
 
       if(!accepted)
         {
@@ -100,6 +116,21 @@ public:
    int               EnvironmentRequiredEntries(void)
      {
       return(m_environment_required_entries);
+     }
+
+   int               AdditionalGlobalEntries(void)
+     {
+      return(m_additional_global_entries);
+     }
+
+   int               AdditionalPerSymbolEntries(void)
+     {
+      return(m_additional_per_symbol_entries);
+     }
+
+   int               AdditionalRequiredEntries(void)
+     {
+      return(m_additional_required_entries);
      }
 
    int               TotalRequiredEntries(void)

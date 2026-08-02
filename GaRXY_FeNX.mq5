@@ -21,6 +21,7 @@
 #include "Strategy/StrategySelectionEngine.mqh"
 #include "Standby/StandbyEngine.mqh"
 #include "Risk/RiskEngine.mqh"
+#include "Confidence/ConfidenceEngine.mqh"
 #include "Execution/ExecutionEngine.mqh"
 #include "Test/BacktestValidationReporter.mqh"
 
@@ -64,6 +65,7 @@ CTradingStyleEngine      g_trading_style_engine;
 CStrategySelectionEngine g_strategy_selection_engine;
 CStandbyEngine           g_standby_engine;
 CRiskEngine              g_risk_engine;
+CConfidenceEngine        g_confidence_engine;
 CExecutionEngine         g_execution_engine;
 
 //+------------------------------------------------------------------+
@@ -101,7 +103,9 @@ int OnInit()
 
    CDataBusCapacityPlan capacity_plan;
    if(!capacity_plan.Build(g_parameters.MarketSelectionSymbolCount(),
-                           FENX_COMMON_ENVIRONMENT_KEY_COUNT) ||
+                           FENX_COMMON_ENVIRONMENT_KEY_COUNT,
+                           FENX_COMMON_CONFIDENCE_GLOBAL_KEY_COUNT,
+                           FENX_COMMON_CONFIDENCE_PER_SYMBOL_KEY_COUNT) ||
       !capacity_plan.Validate(g_controller.DataBus()))
      {
       CLogger::Error("Unable to satisfy the startup DataBus capacity plan.");
@@ -111,6 +115,11 @@ int OnInit()
    if(!g_environment_engine.SetSnapshotStore(g_common_snapshot_store))
      {
       CLogger::Error("Unable to attach CommonSnapshotStore to EnvironmentEngine.");
+      return(INIT_FAILED);
+     }
+   if(!g_confidence_engine.SetSnapshotStore(g_common_snapshot_store))
+     {
+      CLogger::Error("Unable to attach CommonSnapshotStore to ConfidenceEngine.");
       return(INIT_FAILED);
      }
 
@@ -183,6 +192,12 @@ int OnInit()
    if(!g_controller.RegisterEngine(g_risk_engine))
      {
       CLogger::Error("Unable to register RiskEngine.");
+      return(INIT_FAILED);
+     }
+
+   if(!g_controller.RegisterEngine(g_confidence_engine))
+     {
+      CLogger::Error("Unable to register ConfidenceEngine.");
       return(INIT_FAILED);
      }
 
