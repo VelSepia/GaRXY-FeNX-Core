@@ -115,6 +115,28 @@
 #define FENX_DATABUS_FIELD_COMMON_CONFIDENCE_TRANSITION_VALID      "TransitionValid"
 #define FENX_DATABUS_FIELD_COMMON_CONFIDENCE_TRANSITION_UPDATED_AT "TransitionUpdatedAt"
 
+//--- Shadow-only Common Decision Score summary contract. The detailed,
+//--- source-level contract is retained in CCommonSnapshotStore; DataBus only
+//--- exposes the bounded descriptive summary used by diagnostics.
+#define FENX_COMMON_DECISION_SNAPSHOT_VERSION                     "1.0"
+#define FENX_COMMON_DECISION_EXPECTED_SOURCE_COUNT                5
+#define FENX_COMMON_DECISION_GLOBAL_KEY_COUNT                     0
+#define FENX_COMMON_DECISION_PER_SYMBOL_KEY_COUNT                 12
+#define FENX_COMMON_DECISION_COMPARE_EPSILON                      0.000000001
+#define FENX_DATABUS_NAMESPACE_COMMON_DECISION                    "CommonDecision"
+#define FENX_DATABUS_FIELD_COMMON_DECISION_VALID                  "Valid"
+#define FENX_DATABUS_FIELD_COMMON_DECISION_FRESH                  "Fresh"
+#define FENX_DATABUS_FIELD_COMMON_DECISION_STATE                  "State"
+#define FENX_DATABUS_FIELD_COMMON_DECISION_VERSION                "Version"
+#define FENX_DATABUS_FIELD_COMMON_DECISION_UPDATED_AT             "UpdatedAt"
+#define FENX_DATABUS_FIELD_COMMON_DECISION_AVERAGE                "Average"
+#define FENX_DATABUS_FIELD_COMMON_DECISION_MINIMUM                "Minimum"
+#define FENX_DATABUS_FIELD_COMMON_DECISION_MAXIMUM                "Maximum"
+#define FENX_DATABUS_FIELD_COMMON_DECISION_VARIANCE               "Variance"
+#define FENX_DATABUS_FIELD_COMMON_DECISION_COMPLETENESS           "Completeness"
+#define FENX_DATABUS_FIELD_COMMON_DECISION_BOTTLENECK_STAGE       "BottleneckStage"
+#define FENX_DATABUS_FIELD_COMMON_DECISION_STRONGEST_STAGE        "StrongestStage"
+
 //--- Per-symbol Market Selection DataBus namespace and field names
 #define FENX_DATABUS_NAMESPACE_MARKET_SELECTION           "MarketSelection"
 #define FENX_DATABUS_FIELD_MARKET_SELECTION_SYMBOL        "Symbol"
