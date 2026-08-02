@@ -651,6 +651,7 @@ public:
                                     m_pipeline_block_ticks[stage],
                                     m_pipeline_block_events[stage]));
         }
+      m_strategy.LogTask007Summary();
       m_duplicate_guard.Reset();
       CBaseEngine::Shutdown();
      }

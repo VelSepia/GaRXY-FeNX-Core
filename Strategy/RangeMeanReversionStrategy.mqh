@@ -33,6 +33,18 @@ struct SRangeExitIntent
    string   reason;
   };
 
+//--- Read-only Task007 gate state published by Common Confidence. Detailed
+//--- history remains typed inside ConfidenceEngine and is not duplicated here.
+struct STask007ConfidenceGateState
+  {
+   string   transition;
+   int      window_size;
+   bool     is_valid;
+   double   current_completeness;
+   datetime snapshot_updated_at;
+   string   invalid_reason;
+  };
+
 //--- Produces a BUY near RangeLower or SELL near RangeUpper from completed candles only.
 class CRangeMeanReversionStrategy
   {
@@ -51,6 +63,16 @@ private:
    bool      m_allow_sell;
    long      m_c3_block_count;
    datetime  m_c3_last_block_bar_time;
+   long      m_task007_block_count;
+   long      m_task007_only_block_count;
+   long      m_task007_overlap_count;
+   long      m_task007_window_shortage_count;
+   long      m_task007_invalid_count;
+   long      m_task007_buy_misapplication_count;
+   datetime  m_task007_last_block_bar_time;
+   datetime  m_task007_last_overlap_bar_time;
+   datetime  m_task007_last_buy_telemetry_bar_time;
+   datetime  m_task007_last_sell_telemetry_bar_time;
 
    bool ReadBooleanText(const string text,bool &value)
      {
@@ -88,6 +110,218 @@ private:
          return(false);
       value=StringToDouble(text);
       return(true);
+     }
+
+   bool ReadSymbolText(const string name_space,const string field,string &value)
+     {
+      value="";
+      return(m_data_bus!=NULL &&
+             m_data_bus.TryGetSymbolText(name_space,m_symbol,field,value) &&
+             StringLen(value)>0);
+     }
+
+   void ResetTask007GateState(STask007ConfidenceGateState &state)
+     {
+      state.transition="UNAVAILABLE";
+      state.window_size=0;
+      state.is_valid=false;
+      state.current_completeness=0.0;
+      state.snapshot_updated_at=0;
+      state.invalid_reason="databus-summary-unavailable";
+     }
+
+   //--- Reads only the four new transition summaries plus the existing
+   //--- completeness value. A future timestamp is rejected to prevent leakage.
+   bool ReadTask007GateState(STask007ConfidenceGateState &state)
+     {
+      ResetTask007GateState(state);
+      string window_text="";
+      string valid_text="";
+      string completeness_text="";
+      string updated_text="";
+      if(!ReadSymbolText(FENX_DATABUS_NAMESPACE_COMMON_CONFIDENCE,
+                         FENX_DATABUS_FIELD_COMMON_CONFIDENCE_TRANSITION,
+                         state.transition) ||
+         !ReadSymbolText(FENX_DATABUS_NAMESPACE_COMMON_CONFIDENCE,
+                         FENX_DATABUS_FIELD_COMMON_CONFIDENCE_TRANSITION_WINDOW,
+                         window_text) ||
+         !ReadSymbolText(FENX_DATABUS_NAMESPACE_COMMON_CONFIDENCE,
+                         FENX_DATABUS_FIELD_COMMON_CONFIDENCE_TRANSITION_VALID,
+                         valid_text) ||
+         !ReadSymbolText(FENX_DATABUS_NAMESPACE_COMMON_CONFIDENCE,
+                         FENX_DATABUS_FIELD_COMMON_CONFIDENCE_COMPLETENESS,
+                         completeness_text) ||
+         !ReadSymbolText(FENX_DATABUS_NAMESPACE_COMMON_CONFIDENCE,
+                         FENX_DATABUS_FIELD_COMMON_CONFIDENCE_TRANSITION_UPDATED_AT,
+                         updated_text) ||
+         !ReadBooleanText(valid_text,state.is_valid))
+         return(false);
+
+      state.window_size=(int)StringToInteger(window_text);
+      state.current_completeness=StringToDouble(completeness_text);
+      state.snapshot_updated_at=StringToTime(updated_text);
+      if(state.window_size<0 ||
+         state.window_size>FENX_COMMON_CONFIDENCE_TRANSITION_WINDOW_SIZE ||
+         state.current_completeness<0.0 ||
+         state.current_completeness>100.0 ||
+         state.snapshot_updated_at<=0)
+        {
+         state.is_valid=false;
+         state.invalid_reason="transition-summary-out-of-range";
+         return(true);
+        }
+      if(state.snapshot_updated_at>TimeCurrent())
+        {
+         state.is_valid=false;
+         state.invalid_reason="future-transition-snapshot";
+         return(true);
+        }
+
+      if(state.window_size<FENX_COMMON_CONFIDENCE_TRANSITION_WINDOW_SIZE)
+         state.invalid_reason="transition-window-incomplete";
+      else if(!state.is_valid)
+         state.invalid_reason="transition-invalid";
+      else
+         state.invalid_reason="";
+      return(true);
+     }
+
+   bool BeginTask007Telemetry(const ENUM_ORDER_TYPE direction,
+                              const datetime signal_bar_time)
+     {
+      if(direction==ORDER_TYPE_BUY)
+        {
+         if(signal_bar_time==m_task007_last_buy_telemetry_bar_time)
+            return(false);
+         m_task007_last_buy_telemetry_bar_time=signal_bar_time;
+         return(true);
+        }
+      if(signal_bar_time==m_task007_last_sell_telemetry_bar_time)
+         return(false);
+      m_task007_last_sell_telemetry_bar_time=signal_bar_time;
+      return(true);
+     }
+
+   void LogTask007Telemetry(const ENUM_ORDER_TYPE direction,
+                            const datetime signal_bar_time,
+                            const STask007ConfidenceGateState &state,
+                            const bool gate_allowed,const bool gate_blocked,
+                            const string block_reason,const bool c3_match)
+     {
+      const datetime evaluation_time=TimeCurrent();
+      CLogger::Info(StringFormat(
+         "[TASK007_GATE] Time=%s;SignalBarTime=%s;Symbol=%s;Direction=%s;CompletenessTransition=%s;TransitionWindowSize=%d;TransitionValid=%s;CurrentCompleteness=%.2f;GateAllowed=%s;GateBlocked=%s;BlockReason=%s;C3Match=%s;ConfidenceSnapshotUpdatedAt=%s;EntryEvaluationTime=%s;DataLeakSafe=%s;Task007BlockCount=%I64d;Task007OnlyBlockCount=%I64d;C3OverlapCount=%I64d;BUYMisapplicationCount=%I64d;WindowShortageCount=%I64d;InvalidCount=%I64d",
+         TimeToString(evaluation_time,TIME_DATE|TIME_SECONDS),
+         TimeToString(signal_bar_time,TIME_DATE|TIME_SECONDS),m_symbol,
+         (direction==ORDER_TYPE_BUY ? "BUY" : "SELL"),state.transition,
+         state.window_size,(state.is_valid ? "true" : "false"),
+         state.current_completeness,(gate_allowed ? "true" : "false"),
+         (gate_blocked ? "true" : "false"),block_reason,
+         (c3_match ? "true" : "false"),
+         TimeToString(state.snapshot_updated_at,TIME_DATE|TIME_SECONDS),
+         TimeToString(evaluation_time,TIME_DATE|TIME_SECONDS),
+         (state.snapshot_updated_at>0 &&
+          state.snapshot_updated_at<=evaluation_time ? "true" : "false"),
+         m_task007_block_count,m_task007_only_block_count,
+         m_task007_overlap_count,m_task007_buy_misapplication_count,
+         m_task007_window_shortage_count,m_task007_invalid_count));
+     }
+
+   //--- The C3 result is evaluated first. When it blocks, this audit records
+   //--- whether Task007 would also have matched without changing C3 behavior.
+   void AuditTask007C3Overlap(const datetime signal_bar_time)
+     {
+      STask007ConfidenceGateState state;
+      const bool loaded=ReadTask007GateState(state);
+      const bool full_maintained=
+         (loaded && state.is_valid &&
+          state.window_size==FENX_COMMON_CONFIDENCE_TRANSITION_WINDOW_SIZE &&
+          state.transition=="FULL_MAINTAINED");
+      if(full_maintained && signal_bar_time!=m_task007_last_overlap_bar_time)
+        {
+         m_task007_last_overlap_bar_time=signal_bar_time;
+         m_task007_overlap_count++;
+        }
+      if(!BeginTask007Telemetry(ORDER_TYPE_SELL,signal_bar_time))
+         return;
+      if(!loaded || !state.is_valid)
+        {
+         if(state.window_size<FENX_COMMON_CONFIDENCE_TRANSITION_WINDOW_SIZE)
+            m_task007_window_shortage_count++;
+         else
+            m_task007_invalid_count++;
+        }
+      LogTask007Telemetry(ORDER_TYPE_SELL,signal_bar_time,state,false,false,
+                          (full_maintained ?
+                           "C3_PRECEDENCE_TASK007_MATCH" :
+                           "C3_PRECEDENCE_TASK007_NO_MATCH"),true);
+     }
+
+   //--- Applies Task007 only to an already approved SELL entry. BUY and any
+   //--- unavailable/incomplete/invalid transition preserve baseline behavior.
+   bool PassesTask007ConfidenceGate(const ENUM_ORDER_TYPE direction,
+                                    const datetime signal_bar_time,
+                                    string &reason)
+     {
+      STask007ConfidenceGateState state;
+      const bool loaded=ReadTask007GateState(state);
+      const bool record=BeginTask007Telemetry(direction,signal_bar_time);
+      if(direction==ORDER_TYPE_BUY)
+        {
+         if(record)
+            LogTask007Telemetry(direction,signal_bar_time,state,true,false,
+                                "BUY_NOT_APPLICABLE",false);
+         return(true);
+        }
+
+      if(!loaded)
+        {
+         if(record)
+           {
+            m_task007_invalid_count++;
+            LogTask007Telemetry(direction,signal_bar_time,state,true,false,
+                                "TRANSITION_DATA_UNAVAILABLE",false);
+           }
+         return(true);
+        }
+      if(state.window_size<FENX_COMMON_CONFIDENCE_TRANSITION_WINDOW_SIZE)
+        {
+         if(record)
+           {
+            m_task007_window_shortage_count++;
+            LogTask007Telemetry(direction,signal_bar_time,state,true,false,
+                                "TRANSITION_WINDOW_INCOMPLETE",false);
+           }
+         return(true);
+        }
+      if(!state.is_valid)
+        {
+         if(record)
+           {
+            m_task007_invalid_count++;
+            LogTask007Telemetry(direction,signal_bar_time,state,true,false,
+                                state.invalid_reason,false);
+           }
+         return(true);
+        }
+      if(state.transition!="FULL_MAINTAINED")
+        {
+         if(record)
+            LogTask007Telemetry(direction,signal_bar_time,state,true,false,
+                                "TRANSITION_NOT_FULL_MAINTAINED",false);
+         return(true);
+        }
+
+      reason="TASK007_SELL_FULL_MAINTAINED";
+      if(signal_bar_time!=m_task007_last_block_bar_time)
+        {
+         m_task007_last_block_bar_time=signal_bar_time;
+         m_task007_block_count++;
+         m_task007_only_block_count++;
+        }
+      if(record)
+         LogTask007Telemetry(direction,signal_bar_time,state,false,true,reason,false);
+      return(false);
      }
 
    double ClampScore(const double value)
@@ -368,6 +602,16 @@ public:
       m_allow_sell=true;
       m_c3_block_count=0;
       m_c3_last_block_bar_time=0;
+      m_task007_block_count=0;
+      m_task007_only_block_count=0;
+      m_task007_overlap_count=0;
+      m_task007_window_shortage_count=0;
+      m_task007_invalid_count=0;
+      m_task007_buy_misapplication_count=0;
+      m_task007_last_block_bar_time=0;
+      m_task007_last_overlap_bar_time=0;
+      m_task007_last_buy_telemetry_bar_time=0;
+      m_task007_last_sell_telemetry_bar_time=0;
      }
 
    void              Configure(CDataBus &data_bus,const string symbol,
@@ -385,6 +629,16 @@ public:
       m_allow_sell=allow_sell;
       m_c3_block_count=0;
       m_c3_last_block_bar_time=0;
+      m_task007_block_count=0;
+      m_task007_only_block_count=0;
+      m_task007_overlap_count=0;
+      m_task007_window_shortage_count=0;
+      m_task007_invalid_count=0;
+      m_task007_buy_misapplication_count=0;
+      m_task007_last_block_bar_time=0;
+      m_task007_last_overlap_bar_time=0;
+      m_task007_last_buy_telemetry_bar_time=0;
+      m_task007_last_sell_telemetry_bar_time=0;
      }
 
    bool              Evaluate(SRangeEntryIntent &intent)
@@ -447,21 +701,51 @@ public:
         }
 
       if(m_allow_buy && MathAbs(close_price-lower)<=boundary)
-         return(ApproveEntry(ORDER_TYPE_BUY,
-                             "Completed-bar close is near RangeLower.",intent));
+        {
+         if(!ApproveEntry(ORDER_TYPE_BUY,
+                          "Completed-bar close is near RangeLower.",intent))
+            return(false);
+         string gate_reason="";
+         // BUY is audited but can never be blocked by the SELL-only gate.
+         PassesTask007ConfidenceGate(ORDER_TYPE_BUY,intent.bar_time,gate_reason);
+         return(true);
+        }
       if(m_allow_sell && MathAbs(close_price-upper)<=boundary)
         {
          string filter_reason="";
          if(!PassesTask015C3SellFilter(intent.bar_time,filter_reason))
            {
+            AuditTask007C3Overlap(intent.bar_time);
             intent.reason=filter_reason;
             return(false);
            }
-         return(ApproveEntry(ORDER_TYPE_SELL,
-                             "Completed-bar close is near RangeUpper.",intent));
+         if(!ApproveEntry(ORDER_TYPE_SELL,
+                          "Completed-bar close is near RangeUpper.",intent))
+            return(false);
+         string gate_reason="";
+         if(!PassesTask007ConfidenceGate(ORDER_TYPE_SELL,intent.bar_time,
+                                         gate_reason))
+           {
+            intent.has_signal=false;
+            intent.reason=gate_reason;
+            return(false);
+           }
+         return(true);
         }
       intent.reason="Completed-bar close is away from both range boundaries.";
       return(false);
+     }
+
+   //--- Emits one bounded end-of-run aggregate for Strategy Tester auditing.
+   void              LogTask007Summary(void)
+     {
+      CLogger::Info(StringFormat(
+         "[TASK007_SUMMARY] Task007BlockCount=%I64d;Task007OnlyBlockCount=%I64d;C3OverlapCount=%I64d;BUYMisapplicationCount=%I64d;WindowShortageCount=%I64d;InvalidCount=%I64d;WindowSize=%d;FullThreshold=%.3f",
+         m_task007_block_count,m_task007_only_block_count,
+         m_task007_overlap_count,m_task007_buy_misapplication_count,
+         m_task007_window_shortage_count,m_task007_invalid_count,
+         FENX_COMMON_CONFIDENCE_TRANSITION_WINDOW_SIZE,
+         FENX_COMMON_CONFIDENCE_FULL_COMPLETENESS_THRESHOLD));
      }
 
    //--- Closes at the current range midpoint using completed bars only.

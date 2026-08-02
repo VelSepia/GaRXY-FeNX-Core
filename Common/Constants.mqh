@@ -91,10 +91,12 @@
 
 //--- Shadow-only Common Confidence summary contract. Detailed source facts
 //--- remain in CCommonSnapshotStore; DataBus receives only bounded summaries.
-#define FENX_COMMON_CONFIDENCE_SNAPSHOT_VERSION                   "1.0"
+#define FENX_COMMON_CONFIDENCE_SNAPSHOT_VERSION                   "1.1"
 #define FENX_COMMON_CONFIDENCE_EXPECTED_SOURCE_COUNT              8
+#define FENX_COMMON_CONFIDENCE_TRANSITION_WINDOW_SIZE             6
+#define FENX_COMMON_CONFIDENCE_FULL_COMPLETENESS_THRESHOLD        99.999
 #define FENX_COMMON_CONFIDENCE_GLOBAL_KEY_COUNT                   0
-#define FENX_COMMON_CONFIDENCE_PER_SYMBOL_KEY_COUNT               12
+#define FENX_COMMON_CONFIDENCE_PER_SYMBOL_KEY_COUNT               16
 #define FENX_DATABUS_NAMESPACE_COMMON_CONFIDENCE                  "CommonConfidence"
 #define FENX_DATABUS_FIELD_COMMON_CONFIDENCE_VALID                "Valid"
 #define FENX_DATABUS_FIELD_COMMON_CONFIDENCE_FRESH                "Fresh"
@@ -108,6 +110,10 @@
 #define FENX_DATABUS_FIELD_COMMON_CONFIDENCE_VALID_SOURCE_COUNT   "ValidSourceCount"
 #define FENX_DATABUS_FIELD_COMMON_CONFIDENCE_MISSING_SOURCE_COUNT "MissingSourceCount"
 #define FENX_DATABUS_FIELD_COMMON_CONFIDENCE_BOTTLENECK_STAGE     "BottleneckStage"
+#define FENX_DATABUS_FIELD_COMMON_CONFIDENCE_TRANSITION            "CompletenessTransition"
+#define FENX_DATABUS_FIELD_COMMON_CONFIDENCE_TRANSITION_WINDOW     "TransitionWindowCount"
+#define FENX_DATABUS_FIELD_COMMON_CONFIDENCE_TRANSITION_VALID      "TransitionValid"
+#define FENX_DATABUS_FIELD_COMMON_CONFIDENCE_TRANSITION_UPDATED_AT "TransitionUpdatedAt"
 
 //--- Per-symbol Market Selection DataBus namespace and field names
 #define FENX_DATABUS_NAMESPACE_MARKET_SELECTION           "MarketSelection"

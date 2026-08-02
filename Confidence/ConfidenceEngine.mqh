@@ -22,6 +22,7 @@ private:
    bool                  m_initial_status_logged[];
    bool                  m_valid_snapshot_logged[];
    datetime              m_last_telemetry_bar[];
+   SConfidenceCompletenessHistory m_transition_histories[];
    CCommonSnapshotStore *m_snapshot_store;
 
    void ResetSource(SConfidenceSourceSnapshot &source,const string stage)
@@ -52,6 +53,11 @@ private:
       snapshot.invalid_source_count=0;
       snapshot.stale_source_count=0;
       snapshot.completeness_ratio=0.0;
+      snapshot.completeness_transition="WINDOW_INCOMPLETE";
+      snapshot.transition_window_size=0;
+      snapshot.transition_valid=false;
+      snapshot.transition_updated_at=0;
+      snapshot.transition_invalid_reason="transition-history-empty";
       ResetSource(snapshot.market_state_confidence,"MarketState");
       ResetSource(snapshot.market_selection_confidence,"MarketSelection");
       ResetSource(snapshot.pair_ranking_confidence,"PairRanking");
@@ -69,6 +75,57 @@ private:
       snapshot.bottleneck_stage="";
       snapshot.strongest_stage="";
       snapshot.market_state="UNKNOWN";
+     }
+
+   //--- Copies the bounded per-symbol history into the typed transition
+   //--- summary. Only the first snapshot from each new bar is appended so the
+   //--- six observations exactly match Task005/Task006 telemetry cadence.
+   void ApplyCompletenessTransition(const int symbol_index,
+                                    SConfidenceSnapshot &snapshot)
+     {
+      const datetime bar_time=iTime(snapshot.symbol,_Period,0);
+      if(bar_time<=0)
+        {
+         snapshot.completeness_transition="WINDOW_INCOMPLETE";
+         snapshot.transition_window_size=m_transition_histories[symbol_index].count;
+         snapshot.transition_valid=false;
+         snapshot.transition_updated_at=0;
+         snapshot.transition_invalid_reason="current-bar-time-unavailable";
+         return;
+        }
+
+      FenxAppendConfidenceCompletenessSnapshot(
+         m_transition_histories[symbol_index],bar_time,snapshot.updated_at,
+         snapshot.completeness_ratio,
+         snapshot.validity_state);
+      snapshot.transition_window_size=m_transition_histories[symbol_index].count;
+      if(m_transition_histories[symbol_index].count>0)
+         snapshot.transition_updated_at=
+            m_transition_histories[symbol_index].snapshot_updated_at[
+               m_transition_histories[symbol_index].count-1];
+      snapshot.completeness_transition=
+         FenxClassifyConfidenceCompletenessTransition(
+            m_transition_histories[symbol_index]);
+
+      if(m_transition_histories[symbol_index].count<
+         FENX_COMMON_CONFIDENCE_TRANSITION_WINDOW_SIZE)
+        {
+         snapshot.transition_valid=false;
+         snapshot.transition_invalid_reason=StringFormat(
+            "window-incomplete:%d/%d",
+            m_transition_histories[symbol_index].count,
+            FENX_COMMON_CONFIDENCE_TRANSITION_WINDOW_SIZE);
+         return;
+        }
+      if(snapshot.completeness_transition=="INVALID_OR_STALE_AT_ENTRY")
+        {
+         snapshot.transition_valid=false;
+         snapshot.transition_invalid_reason="current-snapshot-invalid-or-stale";
+         return;
+        }
+
+      snapshot.transition_valid=true;
+      snapshot.transition_invalid_reason="";
      }
 
    void AppendReason(string &target,const string value)
@@ -479,6 +536,11 @@ private:
              left.invalid_source_count==right.invalid_source_count &&
              left.stale_source_count==right.stale_source_count &&
              left.completeness_ratio==right.completeness_ratio &&
+             left.completeness_transition==right.completeness_transition &&
+             left.transition_window_size==right.transition_window_size &&
+             left.transition_valid==right.transition_valid &&
+             left.transition_updated_at==right.transition_updated_at &&
+             left.transition_invalid_reason==right.transition_invalid_reason &&
              SameSource(left.market_state_confidence,right.market_state_confidence) &&
              SameSource(left.market_selection_confidence,right.market_selection_confidence) &&
              SameSource(left.pair_ranking_confidence,right.pair_ranking_confidence) &&
@@ -557,6 +619,15 @@ private:
                        IntegerToString(snapshot.missing_source_count),verify)) success=false;
       if(!PublishField(snapshot.symbol,FENX_DATABUS_FIELD_COMMON_CONFIDENCE_BOTTLENECK_STAGE,
                        snapshot.bottleneck_stage,verify)) success=false;
+      if(!PublishField(snapshot.symbol,FENX_DATABUS_FIELD_COMMON_CONFIDENCE_TRANSITION,
+                       snapshot.completeness_transition,verify)) success=false;
+      if(!PublishField(snapshot.symbol,FENX_DATABUS_FIELD_COMMON_CONFIDENCE_TRANSITION_WINDOW,
+                       IntegerToString(snapshot.transition_window_size),verify)) success=false;
+      if(!PublishField(snapshot.symbol,FENX_DATABUS_FIELD_COMMON_CONFIDENCE_TRANSITION_VALID,
+                       (snapshot.transition_valid ? "true" : "false"),verify)) success=false;
+      if(!PublishField(snapshot.symbol,FENX_DATABUS_FIELD_COMMON_CONFIDENCE_TRANSITION_UPDATED_AT,
+                       TimeToString(snapshot.transition_updated_at,
+                                    TIME_DATE|TIME_SECONDS),verify)) success=false;
       return(success);
      }
 
@@ -568,12 +639,15 @@ private:
       m_last_telemetry_bar[symbol_index]=bar_time;
 
       CLogger::Info(StringFormat(
-         "[CONFIDENCE_TELEMETRY] Time=%s;Symbol=%s;Timeframe=%s;MarketState=%s;Average=%.6f;Minimum=%.6f;Maximum=%.6f;Variance=%.6f;Completeness=%.2f;BottleneckStage=%s;Validity=%s;Direction=UNKNOWN;EntryAllowed=UNKNOWN;EntryBlocked=UNKNOWN;C3Block=UNKNOWN",
+         "[CONFIDENCE_TELEMETRY] Time=%s;Symbol=%s;Timeframe=%s;MarketState=%s;Average=%.6f;Minimum=%.6f;Maximum=%.6f;Variance=%.6f;Completeness=%.2f;BottleneckStage=%s;Validity=%s;CompletenessTransition=%s;TransitionWindowSize=%d;TransitionValid=%s;TransitionUpdatedAt=%s;Direction=UNKNOWN;EntryAllowed=UNKNOWN;EntryBlocked=UNKNOWN;C3Block=UNKNOWN",
          TimeToString(snapshot.updated_at,TIME_DATE|TIME_SECONDS),snapshot.symbol,
          snapshot.timeframe,snapshot.market_state,snapshot.average_confidence,
          snapshot.minimum_confidence,snapshot.maximum_confidence,
          snapshot.confidence_variance,snapshot.completeness_ratio,
-         snapshot.bottleneck_stage,snapshot.validity_state));
+         snapshot.bottleneck_stage,snapshot.validity_state,
+         snapshot.completeness_transition,snapshot.transition_window_size,
+         (snapshot.transition_valid ? "true" : "false"),
+         TimeToString(snapshot.transition_updated_at,TIME_DATE|TIME_SECONDS)));
      }
 
    bool LoadSymbols(CParameterManager &parameters)
@@ -584,7 +658,8 @@ private:
          ArrayResize(m_consistency_verified,symbol_count)!=symbol_count ||
          ArrayResize(m_initial_status_logged,symbol_count)!=symbol_count ||
          ArrayResize(m_valid_snapshot_logged,symbol_count)!=symbol_count ||
-         ArrayResize(m_last_telemetry_bar,symbol_count)!=symbol_count)
+         ArrayResize(m_last_telemetry_bar,symbol_count)!=symbol_count ||
+         ArrayResize(m_transition_histories,symbol_count)!=symbol_count)
          return(false);
 
       for(int index=0;index<symbol_count;index++)
@@ -595,6 +670,8 @@ private:
          m_initial_status_logged[index]=false;
          m_valid_snapshot_logged[index]=false;
          m_last_telemetry_bar[index]=0;
+         FenxResetConfidenceCompletenessHistory(
+            m_transition_histories[index],m_symbols[index],_Period);
         }
       return(true);
      }
@@ -649,6 +726,7 @@ public:
             CLogger::Error("ConfidenceEngine could not collect its source contract.");
             continue;
            }
+         ApplyCompletenessTransition(index,snapshot);
          if(!StoreTypedSnapshot(index,snapshot))
            {
             CLogger::Error("ConfidenceEngine could not store or verify its typed snapshot.");
@@ -698,6 +776,7 @@ public:
       ArrayFree(m_initial_status_logged);
       ArrayFree(m_valid_snapshot_logged);
       ArrayFree(m_last_telemetry_bar);
+      ArrayFree(m_transition_histories);
       CBaseEngine::Shutdown();
      }
   };
