@@ -6,22 +6,8 @@
 
 #include "../Common/Constants.mqh"
 #include "../Common/Logger.mqh"
+#include "../Common/CommonSnapshotStore.mqh"
 #include "../Engine/BaseEngine.mqh"
-
-//--- Internal range-analysis facts. Runtime consumers receive values through CDataBus only.
-struct SRangeSnapshot
-  {
-   double   upper;
-   double   lower;
-   double   width_points;
-   double   midpoint;
-   double   position;
-   double   score;
-   bool     is_range;
-   bool     is_data_valid;
-   datetime updated_at;
-   datetime closed_bar_time;
-  };
 
 //--- Detects stable, non-directional price ranges from completed candles only.
 class CRangeDetector : public CBaseEngine
@@ -37,6 +23,9 @@ private:
    double m_break_buffer_atr_fraction;
    int    m_max_break_events;
    double m_score_threshold;
+   int    m_freshness_limit_seconds;
+   bool   m_consistency_verified;
+   CCommonSnapshotStore *m_snapshot_store;
 
    void ResetSnapshot(SRangeSnapshot &snapshot)
      {
@@ -278,6 +267,99 @@ private:
       return(success);
      }
 
+   //--- Completes the typed mirror only after legacy publication. The source
+   //--- values are normalized to the exact existing DataBus precision; no
+   //--- boundary, score, or IsRange calculation is repeated here.
+   void BuildTypedSnapshot(SRangeSnapshot &snapshot,const double atr)
+     {
+      const int digits=(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS);
+      snapshot.upper=StringToDouble(DoubleToString(snapshot.upper,digits));
+      snapshot.lower=StringToDouble(DoubleToString(snapshot.lower,digits));
+      snapshot.width_points=StringToDouble(DoubleToString(snapshot.width_points,2));
+      snapshot.midpoint=StringToDouble(DoubleToString(snapshot.midpoint,digits));
+      snapshot.position=StringToDouble(DoubleToString(snapshot.position,4));
+      snapshot.score=StringToDouble(DoubleToString(snapshot.score,2));
+      snapshot.symbol=_Symbol;
+      snapshot.timeframe=EnumToString(_Period);
+      snapshot.snapshot_version=FENX_COMMON_RANGE_SNAPSHOT_VERSION;
+      snapshot.is_valid=false;
+      snapshot.is_fresh=false;
+      snapshot.invalid_reason="";
+      snapshot.source_updated_at=snapshot.updated_at;
+      snapshot.source_bar_time=snapshot.closed_bar_time;
+      snapshot.lookback=m_lookback_bars;
+      snapshot.price_digits=digits;
+      snapshot.point_size=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
+      snapshot.source_atr=atr;
+      snapshot.atr_updated_at=0;
+      CRangeSnapshotContract contract;
+      contract.Finalize(snapshot,TimeCurrent(),m_freshness_limit_seconds);
+     }
+
+   bool SameTypedSnapshot(const SRangeSnapshot &left,
+                          const SRangeSnapshot &right)
+     {
+      return(left.upper==right.upper && left.lower==right.lower &&
+             left.width_points==right.width_points &&
+             left.midpoint==right.midpoint && left.position==right.position &&
+             left.score==right.score && left.is_range==right.is_range &&
+             left.is_data_valid==right.is_data_valid &&
+             left.updated_at==right.updated_at &&
+             left.closed_bar_time==right.closed_bar_time &&
+             left.symbol==right.symbol && left.timeframe==right.timeframe &&
+             left.snapshot_version==right.snapshot_version &&
+             left.is_valid==right.is_valid && left.is_fresh==right.is_fresh &&
+             left.invalid_reason==right.invalid_reason &&
+             left.source_updated_at==right.source_updated_at &&
+             left.source_bar_time==right.source_bar_time &&
+             left.lookback==right.lookback &&
+             left.price_digits==right.price_digits &&
+             left.point_size==right.point_size &&
+             left.source_atr==right.source_atr &&
+             left.atr_updated_at==right.atr_updated_at);
+     }
+
+   bool StoreTypedSnapshot(const SRangeSnapshot &snapshot)
+     {
+      if(m_snapshot_store==NULL ||
+         !m_snapshot_store.SetRangeSnapshot(_Symbol,_Period,snapshot))
+         return(false);
+      if(m_consistency_verified)
+         return(true);
+
+      SRangeSnapshot stored;
+      if(!m_snapshot_store.GetRangeSnapshot(_Symbol,_Period,stored) ||
+         !SameTypedSnapshot(snapshot,stored))
+         return(false);
+
+      string upper="",lower="",width="",midpoint="",position="",score="";
+      string is_range="",is_valid="",updated="",closed_bar="";
+      const int digits=(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS);
+      if(m_data_bus==NULL ||
+         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_UPPER,upper) ||
+         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_LOWER,lower) ||
+         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_WIDTH_POINTS,width) ||
+         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_MIDPOINT,midpoint) ||
+         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_POSITION,position) ||
+         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_SCORE,score) ||
+         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_IS_RANGE,is_range) ||
+         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_DATA_VALID,is_valid) ||
+         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_UPDATED_AT,updated) ||
+         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_CLOSED_BAR_TIME,closed_bar))
+         return(false);
+
+      return(upper==DoubleToString(snapshot.upper,digits) &&
+             lower==DoubleToString(snapshot.lower,digits) &&
+             width==DoubleToString(snapshot.width_points,2) &&
+             midpoint==DoubleToString(snapshot.midpoint,digits) &&
+             position==DoubleToString(snapshot.position,4) &&
+             score==DoubleToString(snapshot.score,2) &&
+             is_range==(snapshot.is_range ? "true" : "false") &&
+             is_valid==(snapshot.is_data_valid ? "true" : "false") &&
+             updated==TimeToString(snapshot.updated_at,TIME_DATE|TIME_SECONDS) &&
+             closed_bar==TimeToString(snapshot.closed_bar_time,TIME_DATE|TIME_SECONDS));
+     }
+
 public:
                      CRangeDetector(void)
      {
@@ -292,10 +374,28 @@ public:
       m_break_buffer_atr_fraction=0.0;
       m_max_break_events=0;
       m_score_threshold=0.0;
+      m_freshness_limit_seconds=0;
+      m_consistency_verified=false;
+      m_snapshot_store=NULL;
+     }
+
+   //--- Injects the non-owning typed store before framework initialization.
+   //--- All trading consumers continue to use the legacy Range DataBus keys.
+   bool              SetSnapshotStore(CCommonSnapshotStore &snapshot_store)
+     {
+      if(m_initialized)
+         return(false);
+      m_snapshot_store=GetPointer(snapshot_store);
+      return(m_snapshot_store!=NULL);
      }
 
    virtual bool       Initialize(CDataBus &data_bus,CParameterManager &parameters)
      {
+      if(m_snapshot_store==NULL)
+        {
+         CLogger::Error("RangeDetector requires CommonSnapshotStore before initialization.");
+         return(false);
+        }
       if(!CBaseEngine::Initialize(data_bus,parameters))
          return(false);
 
@@ -309,6 +409,7 @@ public:
       m_break_buffer_atr_fraction=parameters.RangeBreakBufferAtrFraction();
       m_max_break_events=parameters.RangeMaxBreakEvents();
       m_score_threshold=parameters.RangeScoreThreshold();
+      m_freshness_limit_seconds=parameters.RiskStaleDataLimitSeconds();
 
       if(m_lookback_bars<10 || m_boundary_trim_fraction<0.0 ||
          m_boundary_trim_fraction>=0.5 || m_min_boundary_touches<1 ||
@@ -316,7 +417,8 @@ public:
          m_max_width_atr_multiple<=m_min_width_atr_multiple ||
          m_touch_tolerance_atr_fraction<=0.0 ||
          m_break_buffer_atr_fraction<=0.0 || m_max_break_events<1 ||
-         m_score_threshold<0.0 || m_score_threshold>100.0)
+         m_score_threshold<0.0 || m_score_threshold>100.0 ||
+         m_freshness_limit_seconds<=0)
         {
          CLogger::Error("RangeDetector received invalid configuration.");
          CBaseEngine::Shutdown();
@@ -347,12 +449,32 @@ public:
         }
 
       if(!PublishSnapshot(snapshot))
+        {
          CLogger::Error("RangeDetector could not publish its snapshot to DataBus.");
+         return;
+        }
+
+      BuildTypedSnapshot(snapshot,atr);
+      if(!StoreTypedSnapshot(snapshot))
+        {
+         CLogger::Error("RangeDetector could not store or verify its typed snapshot.");
+         return;
+        }
+      if(!m_consistency_verified)
+        {
+         CLogger::Info(StringFormat(
+            "[COMMON_RANGE] typed_databus_consistency=PASS;symbol=%s;timeframe=%s;store_count=%d;keys=0;lookback=%d;price_digits=%d;atr_updated_at_available=false",
+            snapshot.symbol,snapshot.timeframe,
+            m_snapshot_store.RangeSnapshotCount(),snapshot.lookback,
+            snapshot.price_digits));
+         m_consistency_verified=true;
+        }
      }
 
    virtual void       Shutdown(void)
      {
       // No indicator handles are owned by RangeDetector.
+      m_consistency_verified=false;
       CBaseEngine::Shutdown();
      }
   };

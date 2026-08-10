@@ -38,6 +38,10 @@
 #define FENX_DATABUS_KEY_ENVIRONMENT_RANGE_UPDATED_AT     "Environment.Range.UpdatedAt"
 #define FENX_DATABUS_KEY_ENVIRONMENT_RANGE_CLOSED_BAR_TIME "Environment.Range.ClosedBarTime"
 
+//--- Typed-only Common Range snapshot contract. Existing
+//--- Environment.Range.* keys remain the authoritative trading interface.
+#define FENX_COMMON_RANGE_SNAPSHOT_VERSION                "1.0"
+
 //--- Environment trend-analysis DataBus keys
 #define FENX_DATABUS_KEY_ENVIRONMENT_TREND_DIRECTION      "Environment.Trend.Direction"
 #define FENX_DATABUS_KEY_ENVIRONMENT_TREND_STRENGTH       "Environment.Trend.Strength"
