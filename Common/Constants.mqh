@@ -121,7 +121,7 @@
 #define FENX_COMMON_DECISION_SNAPSHOT_VERSION                     "1.0"
 #define FENX_COMMON_DECISION_EXPECTED_SOURCE_COUNT                5
 #define FENX_COMMON_DECISION_GLOBAL_KEY_COUNT                     0
-#define FENX_COMMON_DECISION_PER_SYMBOL_KEY_COUNT                 12
+#define FENX_COMMON_DECISION_PER_SYMBOL_KEY_COUNT                 13
 #define FENX_COMMON_DECISION_COMPARE_EPSILON                      0.000000001
 #define FENX_DATABUS_NAMESPACE_COMMON_DECISION                    "CommonDecision"
 #define FENX_DATABUS_FIELD_COMMON_DECISION_VALID                  "Valid"
@@ -129,6 +129,7 @@
 #define FENX_DATABUS_FIELD_COMMON_DECISION_STATE                  "State"
 #define FENX_DATABUS_FIELD_COMMON_DECISION_VERSION                "Version"
 #define FENX_DATABUS_FIELD_COMMON_DECISION_UPDATED_AT             "UpdatedAt"
+#define FENX_DATABUS_FIELD_COMMON_DECISION_TIMEFRAME              "Timeframe"
 #define FENX_DATABUS_FIELD_COMMON_DECISION_AVERAGE                "Average"
 #define FENX_DATABUS_FIELD_COMMON_DECISION_MINIMUM                "Minimum"
 #define FENX_DATABUS_FIELD_COMMON_DECISION_MAXIMUM                "Maximum"

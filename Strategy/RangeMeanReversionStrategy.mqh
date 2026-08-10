@@ -7,6 +7,7 @@
 #include "../Common/Constants.mqh"
 #include "../Common/Logger.mqh"
 #include "../Core/DataBus.mqh"
+#include "../Decision/DecisionBottleneckGate.mqh"
 
 //--- Completed-bar entry intent. It contains no execution behavior.
 struct SRangeEntryIntent
@@ -73,6 +74,19 @@ private:
    datetime  m_task007_last_overlap_bar_time;
    datetime  m_task007_last_buy_telemetry_bar_time;
    datetime  m_task007_last_sell_telemetry_bar_time;
+   long      m_task011_block_count;
+   long      m_task011_only_block_count;
+   long      m_task011_task007_overlap_count;
+   long      m_task011_c3_overlap_count;
+   long      m_task011_triple_overlap_count;
+   long      m_task011_buy_misapplication_count;
+   long      m_task011_invalid_count;
+   long      m_task011_stale_count;
+   long      m_task011_year_block_count[10];
+   CTask011BlockAuditSequence m_task011_block_audit_sequence;
+   datetime  m_task011_last_block_bar_time;
+   datetime  m_task011_last_buy_telemetry_bar_time;
+   datetime  m_task011_last_sell_telemetry_bar_time;
 
    bool ReadBooleanText(const string text,bool &value)
      {
@@ -118,6 +132,266 @@ private:
       return(m_data_bus!=NULL &&
              m_data_bus.TryGetSymbolText(name_space,m_symbol,field,value) &&
              StringLen(value)>0);
+     }
+
+   //--- Rejects malformed numeric text instead of allowing StringToDouble to
+   //--- silently turn it into zero. An incomplete audit summary must fail open.
+   bool IsTask011NumericText(const string raw_value)
+     {
+      string value=raw_value;
+      StringTrimLeft(value);
+      StringTrimRight(value);
+      const int length=StringLen(value);
+      if(length<1)
+         return(false);
+      bool digit_found=false;
+      bool decimal_found=false;
+      for(int index=0;index<length;index++)
+        {
+         const ushort character=StringGetCharacter(value,index);
+         if(character>=48 && character<=57)
+           {
+            digit_found=true;
+            continue;
+           }
+         if(character==46 && !decimal_found)
+           {
+            decimal_found=true;
+            continue;
+           }
+         if((character==43 || character==45) && index==0)
+            continue;
+         return(false);
+        }
+      return(digit_found);
+     }
+
+   void ResetTask011Input(const ENUM_ORDER_TYPE direction,
+                          SDecisionBottleneckGateInput &gate_input)
+     {
+      gate_input.direction=direction;
+      gate_input.entry_symbol=m_symbol;
+      gate_input.entry_timeframe=EnumToString(_Period);
+      gate_input.evaluation_time=TimeCurrent();
+      gate_input.snapshot_loaded=false;
+      // A per-symbol DataBus key is itself the snapshot symbol identity.
+      gate_input.snapshot_symbol=m_symbol;
+      gate_input.snapshot_timeframe="";
+      gate_input.snapshot_valid=false;
+      gate_input.snapshot_fresh=false;
+      gate_input.snapshot_updated_at=0;
+      gate_input.bottleneck_stage="";
+      gate_input.minimum_score=0.0;
+      gate_input.average_score=0.0;
+      gate_input.capital_score_available=false;
+      gate_input.capital_allocation_score=0.0;
+     }
+
+   //--- Reads the existing Decision Score result without recomputing a score,
+   //--- selecting a minimum, changing tie behavior, or adding a threshold.
+   bool ReadTask011Input(const ENUM_ORDER_TYPE direction,
+                         SDecisionBottleneckGateInput &gate_input)
+     {
+      ResetTask011Input(direction,gate_input);
+      string valid_text="",fresh_text="",updated_text="";
+      string minimum_text="",average_text="",capital_text="";
+      if(!ReadSymbolText(FENX_DATABUS_NAMESPACE_COMMON_DECISION,
+                         FENX_DATABUS_FIELD_COMMON_DECISION_VALID,valid_text) ||
+         !ReadSymbolText(FENX_DATABUS_NAMESPACE_COMMON_DECISION,
+                         FENX_DATABUS_FIELD_COMMON_DECISION_FRESH,fresh_text) ||
+         !ReadSymbolText(FENX_DATABUS_NAMESPACE_COMMON_DECISION,
+                         FENX_DATABUS_FIELD_COMMON_DECISION_UPDATED_AT,updated_text) ||
+         !ReadSymbolText(FENX_DATABUS_NAMESPACE_COMMON_DECISION,
+                         FENX_DATABUS_FIELD_COMMON_DECISION_TIMEFRAME,
+                         gate_input.snapshot_timeframe) ||
+         !ReadSymbolText(FENX_DATABUS_NAMESPACE_COMMON_DECISION,
+                         FENX_DATABUS_FIELD_COMMON_DECISION_BOTTLENECK_STAGE,
+                         gate_input.bottleneck_stage) ||
+         !ReadSymbolText(FENX_DATABUS_NAMESPACE_COMMON_DECISION,
+                         FENX_DATABUS_FIELD_COMMON_DECISION_MINIMUM,minimum_text) ||
+         !ReadSymbolText(FENX_DATABUS_NAMESPACE_COMMON_DECISION,
+                         FENX_DATABUS_FIELD_COMMON_DECISION_AVERAGE,average_text) ||
+         !ReadSymbolText(FENX_DATABUS_NAMESPACE_CAPITAL_ALLOCATION,
+                         FENX_DATABUS_FIELD_CAPITAL_ALLOCATION_SCORE,capital_text) ||
+         !ReadBooleanText(valid_text,gate_input.snapshot_valid) ||
+         !ReadBooleanText(fresh_text,gate_input.snapshot_fresh) ||
+         !IsTask011NumericText(minimum_text) ||
+         !IsTask011NumericText(average_text) ||
+         !IsTask011NumericText(capital_text))
+         return(false);
+
+      gate_input.snapshot_updated_at=StringToTime(updated_text);
+      gate_input.minimum_score=StringToDouble(minimum_text);
+      gate_input.average_score=StringToDouble(average_text);
+      gate_input.capital_allocation_score=StringToDouble(capital_text);
+      gate_input.capital_score_available=
+         (MathIsValidNumber(gate_input.capital_allocation_score) &&
+          gate_input.capital_allocation_score>=0.0 &&
+          gate_input.capital_allocation_score<=100.0);
+      gate_input.snapshot_loaded=
+         (gate_input.snapshot_updated_at>0 &&
+          MathIsValidNumber(gate_input.minimum_score) &&
+          MathIsValidNumber(gate_input.average_score) &&
+          gate_input.minimum_score>=0.0 && gate_input.minimum_score<=100.0 &&
+          gate_input.average_score>=0.0 && gate_input.average_score<=100.0 &&
+          gate_input.capital_score_available);
+      return(gate_input.snapshot_loaded);
+     }
+
+   bool BeginTask011Telemetry(const ENUM_ORDER_TYPE direction,
+                              const datetime signal_bar_time)
+     {
+      if(direction==ORDER_TYPE_BUY)
+        {
+         if(signal_bar_time==m_task011_last_buy_telemetry_bar_time)
+            return(false);
+         m_task011_last_buy_telemetry_bar_time=signal_bar_time;
+         return(true);
+        }
+      if(signal_bar_time==m_task011_last_sell_telemetry_bar_time)
+         return(false);
+      m_task011_last_sell_telemetry_bar_time=signal_bar_time;
+      return(true);
+     }
+
+   void CountTask011YearBlock(const datetime signal_bar_time)
+     {
+      MqlDateTime value;
+      if(TimeToStruct(signal_bar_time,value) && value.year>=2016 && value.year<=2025)
+         m_task011_year_block_count[value.year-2016]++;
+     }
+
+   void LogTask011Telemetry(const datetime signal_bar_time,
+                            const SDecisionBottleneckGateInput &gate_input,
+                            const SDecisionBottleneckGateResult &result,
+                            const bool task007_match,const bool c3_match,
+                            const bool upstream_blocked)
+     {
+      CLogger::Info(StringFormat(
+         "[TASK011_GATE] Time=%s;SignalBarTime=%s;Symbol=%s;Direction=%s;DecisionSnapshotUpdatedAt=%s;DecisionValidity=%s;DecisionFreshness=%s;DecisionTimeframe=%s;BottleneckStage=%s;MinimumScore=%.6f;AverageScore=%.6f;CapitalAllocationScore=%.6f;Task007Match=%s;C3Match=%s;Task011Matched=%s;Task011Allowed=%s;Task011Blocked=%s;FinalEntryAllowed=%s;FinalEntryBlocked=%s;UpstreamBlocked=%s;BlockReason=%s;OrderCreated=UNKNOWN;DataLeakSafe=%s;Task011BlockCount=%I64d;Task011OnlyBlockCount=%I64d;Task007OverlapCount=%I64d;C3OverlapCount=%I64d;TripleOverlapCount=%I64d;BUYMisapplicationCount=%I64d;InvalidCount=%I64d;StaleCount=%I64d",
+         TimeToString(gate_input.evaluation_time,TIME_DATE|TIME_SECONDS),
+         TimeToString(signal_bar_time,TIME_DATE|TIME_SECONDS),m_symbol,
+         (gate_input.direction==ORDER_TYPE_BUY ? "BUY" : "SELL"),
+         TimeToString(gate_input.snapshot_updated_at,TIME_DATE|TIME_SECONDS),
+         (gate_input.snapshot_valid ? "true" : "false"),
+         (gate_input.snapshot_fresh ? "true" : "false"),gate_input.snapshot_timeframe,
+         gate_input.bottleneck_stage,gate_input.minimum_score,gate_input.average_score,
+         gate_input.capital_allocation_score,(task007_match ? "true" : "false"),
+         (c3_match ? "true" : "false"),
+         (result.condition_matched ? "true" : "false"),
+         (result.allowed ? "true" : "false"),
+         (result.blocked ? "true" : "false"),
+         (!upstream_blocked && result.allowed ? "true" : "false"),
+         (upstream_blocked || result.blocked ? "true" : "false"),
+         (upstream_blocked ? "true" : "false"),result.reason,
+         (gate_input.snapshot_updated_at>0 &&
+          gate_input.snapshot_updated_at<=gate_input.evaluation_time ? "true" : "false"),
+         m_task011_block_count,m_task011_only_block_count,
+         m_task011_task007_overlap_count,m_task011_c3_overlap_count,
+         m_task011_triple_overlap_count,m_task011_buy_misapplication_count,
+         m_task011_invalid_count,m_task011_stale_count));
+     }
+
+   //--- Dedicated block audit is intentionally independent from the bounded
+   //--- general telemetry stream. It is called only beside a summary counter
+   //--- increment, so a later re-evaluation of an already-telemetried signal
+   //--- bar cannot leave a counted Task011 block without an audit record.
+   void LogTask011BlockAudit(const long block_sequence,
+                             const datetime signal_bar_time,
+                             const SDecisionBottleneckGateInput &gate_input,
+                             const SDecisionBottleneckGateResult &result,
+                             const bool task007_condition,
+                             const bool c3_condition)
+     {
+      CLogger::Info(StringFormat(
+         "[TASK011_BLOCK_AUDIT] BlockSequence=%I64d;EntryEvaluationTime=%s;Symbol=%s;Timeframe=%s;Direction=%s;SignalBarTime=%s;DecisionSymbol=%s;DecisionTimeframe=%s;DecisionSnapshotUpdatedAt=%s;DecisionValid=%s;DecisionFresh=%s;BottleneckStage=%s;Task007Condition=%s;C3Condition=%s;Task011Condition=%s;FinalBlockReason=%s;SummaryBlockCount=%I64d;DataLeakSafe=%s",
+         block_sequence,
+         TimeToString(gate_input.evaluation_time,TIME_DATE|TIME_SECONDS),
+         gate_input.entry_symbol,gate_input.entry_timeframe,
+         (gate_input.direction==ORDER_TYPE_BUY ? "BUY" : "SELL"),
+         TimeToString(signal_bar_time,TIME_DATE|TIME_SECONDS),
+         gate_input.snapshot_symbol,gate_input.snapshot_timeframe,
+         TimeToString(gate_input.snapshot_updated_at,TIME_DATE|TIME_SECONDS),
+         (gate_input.snapshot_valid ? "true" : "false"),
+         (gate_input.snapshot_fresh ? "true" : "false"),
+         gate_input.bottleneck_stage,
+         (task007_condition ? "true" : "false"),
+         (c3_condition ? "true" : "false"),
+         (result.condition_matched ? "true" : "false"),result.reason,
+         m_task011_block_count,
+         (gate_input.snapshot_updated_at>0 &&
+          gate_input.snapshot_updated_at<=gate_input.evaluation_time ? "true" : "false")));
+     }
+
+   //--- Audits the frozen Task011 predicate even when an earlier gate owns the
+   //--- actual rejection. This changes counters/logging only, never precedence.
+   void AuditTask011UpstreamBlock(const ENUM_ORDER_TYPE direction,
+                                  const datetime signal_bar_time,
+                                  const bool task007_match,const bool c3_match)
+     {
+      SDecisionBottleneckGateInput gate_input;
+      const bool loaded=ReadTask011Input(direction,gate_input);
+      if(!loaded)
+         gate_input.snapshot_loaded=false;
+      CDecisionBottleneckGate gate;
+      SDecisionBottleneckGateResult result;
+      gate.Evaluate(gate_input,result);
+      const bool record=BeginTask011Telemetry(direction,signal_bar_time);
+      // The entry evaluator can revisit a completed bar. Keep overlap totals
+      // aligned with the bounded one-record-per-bar telemetry contract.
+      if(record && result.condition_matched)
+        {
+         if(task007_match)
+            m_task011_task007_overlap_count++;
+         if(c3_match)
+            m_task011_c3_overlap_count++;
+         if(task007_match && c3_match)
+            m_task011_triple_overlap_count++;
+        }
+      if(record)
+         LogTask011Telemetry(signal_bar_time,gate_input,result,task007_match,c3_match,true);
+     }
+
+   //--- Runs after C3 and Task007. BUY is audit-only; all bad snapshot states
+   //--- preserve the pre-Task011 entry result (fail open).
+   bool PassesTask011BottleneckGate(const ENUM_ORDER_TYPE direction,
+                                    const datetime signal_bar_time,string &reason)
+     {
+      SDecisionBottleneckGateInput gate_input;
+      const bool loaded=ReadTask011Input(direction,gate_input);
+      if(!loaded)
+         gate_input.snapshot_loaded=false;
+      CDecisionBottleneckGate gate;
+      SDecisionBottleneckGateResult result;
+      gate.Evaluate(gate_input,result);
+      const bool record=BeginTask011Telemetry(direction,signal_bar_time);
+
+      if(direction==ORDER_TYPE_BUY && result.blocked)
+         m_task011_buy_misapplication_count++;
+      if(record && direction==ORDER_TYPE_SELL && !result.snapshot_accepted)
+        {
+         if(gate_input.snapshot_loaded && gate_input.snapshot_valid && !gate_input.snapshot_fresh)
+            m_task011_stale_count++;
+         else
+            m_task011_invalid_count++;
+        }
+      if(result.blocked)
+        {
+         reason=result.reason;
+         if(signal_bar_time!=m_task011_last_block_bar_time)
+           {
+            m_task011_last_block_bar_time=signal_bar_time;
+            m_task011_block_count++;
+            m_task011_only_block_count++;
+            CountTask011YearBlock(signal_bar_time);
+            const long block_sequence=m_task011_block_audit_sequence.Next();
+            LogTask011BlockAudit(block_sequence,signal_bar_time,gate_input,
+                                 result,false,false);
+           }
+        }
+      if(record)
+         LogTask011Telemetry(signal_bar_time,gate_input,result,false,false,false);
+      return(result.allowed);
      }
 
    void ResetTask007GateState(STask007ConfidenceGateState &state)
@@ -612,6 +886,19 @@ public:
       m_task007_last_overlap_bar_time=0;
       m_task007_last_buy_telemetry_bar_time=0;
       m_task007_last_sell_telemetry_bar_time=0;
+      m_task011_block_count=0;
+      m_task011_only_block_count=0;
+      m_task011_task007_overlap_count=0;
+      m_task011_c3_overlap_count=0;
+      m_task011_triple_overlap_count=0;
+      m_task011_buy_misapplication_count=0;
+      m_task011_invalid_count=0;
+      m_task011_stale_count=0;
+      ArrayInitialize(m_task011_year_block_count,0);
+      m_task011_block_audit_sequence.Reset();
+      m_task011_last_block_bar_time=0;
+      m_task011_last_buy_telemetry_bar_time=0;
+      m_task011_last_sell_telemetry_bar_time=0;
      }
 
    void              Configure(CDataBus &data_bus,const string symbol,
@@ -639,6 +926,19 @@ public:
       m_task007_last_overlap_bar_time=0;
       m_task007_last_buy_telemetry_bar_time=0;
       m_task007_last_sell_telemetry_bar_time=0;
+      m_task011_block_count=0;
+      m_task011_only_block_count=0;
+      m_task011_task007_overlap_count=0;
+      m_task011_c3_overlap_count=0;
+      m_task011_triple_overlap_count=0;
+      m_task011_buy_misapplication_count=0;
+      m_task011_invalid_count=0;
+      m_task011_stale_count=0;
+      ArrayInitialize(m_task011_year_block_count,0);
+      m_task011_block_audit_sequence.Reset();
+      m_task011_last_block_bar_time=0;
+      m_task011_last_buy_telemetry_bar_time=0;
+      m_task011_last_sell_telemetry_bar_time=0;
      }
 
    bool              Evaluate(SRangeEntryIntent &intent)
@@ -708,6 +1008,7 @@ public:
          string gate_reason="";
          // BUY is audited but can never be blocked by the SELL-only gate.
          PassesTask007ConfidenceGate(ORDER_TYPE_BUY,intent.bar_time,gate_reason);
+         PassesTask011BottleneckGate(ORDER_TYPE_BUY,intent.bar_time,gate_reason);
          return(true);
         }
       if(m_allow_sell && MathAbs(close_price-upper)<=boundary)
@@ -715,7 +1016,15 @@ public:
          string filter_reason="";
          if(!PassesTask015C3SellFilter(intent.bar_time,filter_reason))
            {
+            STask007ConfidenceGateState overlap_state;
+            const bool overlap_loaded=ReadTask007GateState(overlap_state);
+            const bool task007_match=
+               (overlap_loaded && overlap_state.is_valid &&
+                overlap_state.window_size==FENX_COMMON_CONFIDENCE_TRANSITION_WINDOW_SIZE &&
+                overlap_state.transition=="FULL_MAINTAINED");
             AuditTask007C3Overlap(intent.bar_time);
+            AuditTask011UpstreamBlock(ORDER_TYPE_SELL,intent.bar_time,
+                                      task007_match,true);
             intent.reason=filter_reason;
             return(false);
            }
@@ -724,6 +1033,14 @@ public:
             return(false);
          string gate_reason="";
          if(!PassesTask007ConfidenceGate(ORDER_TYPE_SELL,intent.bar_time,
+                                         gate_reason))
+           {
+            AuditTask011UpstreamBlock(ORDER_TYPE_SELL,intent.bar_time,true,false);
+            intent.has_signal=false;
+            intent.reason=gate_reason;
+            return(false);
+           }
+         if(!PassesTask011BottleneckGate(ORDER_TYPE_SELL,intent.bar_time,
                                          gate_reason))
            {
             intent.has_signal=false;
@@ -746,6 +1063,29 @@ public:
          m_task007_window_shortage_count,m_task007_invalid_count,
          FENX_COMMON_CONFIDENCE_TRANSITION_WINDOW_SIZE,
          FENX_COMMON_CONFIDENCE_FULL_COMPLETENESS_THRESHOLD));
+      string yearly="";
+      for(int index=0;index<10;index++)
+        {
+         if(StringLen(yearly)>0)
+            yearly+=",";
+         yearly+=IntegerToString(2016+index)+":"+
+                 IntegerToString((int)m_task011_year_block_count[index]);
+        }
+      const long discovery_blocks=
+         m_task011_year_block_count[0]+m_task011_year_block_count[1]+
+         m_task011_year_block_count[2]+m_task011_year_block_count[3]+
+         m_task011_year_block_count[4]+m_task011_year_block_count[5]+
+         m_task011_year_block_count[6]+m_task011_year_block_count[7];
+      const long holdout_blocks=
+         m_task011_year_block_count[8]+m_task011_year_block_count[9];
+      CLogger::Info(StringFormat(
+         "[TASK011_SUMMARY] Task011BlockCount=%I64d;Task011OnlyBlockCount=%I64d;Task011BlockSequenceCount=%I64d;Task007OverlapCount=%I64d;C3OverlapCount=%I64d;TripleOverlapCount=%I64d;BUYMisapplicationCount=%I64d;InvalidCount=%I64d;StaleCount=%I64d;DiscoveryBlockCount=%I64d;HoldoutBlockCount=%I64d;YearBlocks=%s",
+         m_task011_block_count,m_task011_only_block_count,
+         m_task011_block_audit_sequence.Current(),
+         m_task011_task007_overlap_count,m_task011_c3_overlap_count,
+         m_task011_triple_overlap_count,m_task011_buy_misapplication_count,
+         m_task011_invalid_count,m_task011_stale_count,discovery_blocks,
+         holdout_blocks,yearly));
      }
 
    //--- Closes at the current range midpoint using completed bars only.

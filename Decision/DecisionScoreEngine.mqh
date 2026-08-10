@@ -476,6 +476,11 @@ private:
                        snapshot.snapshot_version,verify)) success=false;
       if(!PublishField(snapshot.symbol,FENX_DATABUS_FIELD_COMMON_DECISION_UPDATED_AT,
                        TimeToString(snapshot.updated_at,TIME_DATE|TIME_SECONDS),verify)) success=false;
+      // Timeframe is the only extra summary field required by the Task011
+      // consumer. Publishing the snapshot identity prevents a score produced
+      // for another chart period from being used to block an entry.
+      if(!PublishField(snapshot.symbol,FENX_DATABUS_FIELD_COMMON_DECISION_TIMEFRAME,
+                       snapshot.timeframe,verify)) success=false;
       if(!PublishField(snapshot.symbol,FENX_DATABUS_FIELD_COMMON_DECISION_AVERAGE,
                        DoubleToString(snapshot.average_score,6),verify)) success=false;
       if(!PublishField(snapshot.symbol,FENX_DATABUS_FIELD_COMMON_DECISION_MINIMUM,
