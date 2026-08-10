@@ -5,6 +5,7 @@
 #define FENX_COMMON_SNAPSHOT_STORE_MQH
 
 #include "../Environment/EnvironmentSnapshot.mqh"
+#include "../Environment/VolatilitySnapshot.mqh"
 #include "../Confidence/ConfidenceSnapshot.mqh"
 #include "../Decision/DecisionScoreSnapshot.mqh"
 
@@ -18,6 +19,18 @@ struct SCommonEnvironmentSnapshotRecord
    datetime             updated_at;
    bool                 is_valid;
    SEnvironmentSnapshot environment;
+  };
+
+//--- Metadata and typed payload for one Common Volatility identity.
+struct SCommonVolatilitySnapshotRecord
+  {
+   string              symbol;
+   ENUM_TIMEFRAMES     timeframe;
+   string              snapshot_type;
+   string              snapshot_version;
+   datetime            updated_at;
+   bool                is_valid;
+   SVolatilitySnapshot volatility;
   };
 
 //--- Metadata and typed payload for one Common Confidence identity.
@@ -44,12 +57,14 @@ struct SCommonDecisionScoreSnapshotRecord
    SDecisionScoreSnapshot decision_score;
   };
 
-//--- Shadow-only typed storage shared by future Original/Personal engines.
-//--- Task004 stores Environment snapshots without changing trading consumers.
+//--- Shadow-only typed storage shared by Original/Personal common engines.
+//--- Each API keeps its existing Symbol+Timeframe identity and does not change
+//--- legacy DataBus consumers or their trading behavior.
 class CCommonSnapshotStore
   {
 private:
    SCommonEnvironmentSnapshotRecord m_environment_records[];
+   SCommonVolatilitySnapshotRecord  m_volatility_records[];
    SCommonConfidenceSnapshotRecord  m_confidence_records[];
    SCommonDecisionScoreSnapshotRecord m_decision_score_records[];
 
@@ -72,6 +87,18 @@ private:
         {
          if(m_confidence_records[index].symbol==symbol &&
             m_confidence_records[index].timeframe==timeframe)
+            return(index);
+        }
+      return(-1);
+     }
+
+   int               FindVolatilityIndex(const string symbol,
+                                         const ENUM_TIMEFRAMES timeframe)
+     {
+      for(int index=0;index<ArraySize(m_volatility_records);index++)
+        {
+         if(m_volatility_records[index].symbol==symbol &&
+            m_volatility_records[index].timeframe==timeframe)
             return(index);
         }
       return(-1);
@@ -140,6 +167,60 @@ public:
    int               Count(void)
      {
       return(ArraySize(m_environment_records));
+     }
+
+   //--- Adds or replaces one typed Common Volatility snapshot. The payload is
+   //--- already calculated by VolatilityAnalyzer; this store never derives or
+   //--- recalculates ATR, score, or level.
+   bool              SetVolatilitySnapshot(const string symbol,
+                                           const ENUM_TIMEFRAMES timeframe,
+                                           const SVolatilitySnapshot &snapshot)
+     {
+      if(StringLen(symbol)==0 || PeriodSeconds(timeframe)<=0 ||
+         snapshot.symbol!=symbol ||
+         snapshot.timeframe!=EnumToString(timeframe) ||
+         StringLen(snapshot.snapshot_version)==0 || snapshot.updated_at<=0)
+         return(false);
+
+      int index=FindVolatilityIndex(symbol,timeframe);
+      if(index<0)
+        {
+         const int count=ArraySize(m_volatility_records);
+         if(ArrayResize(m_volatility_records,count+1)!=(count+1))
+            return(false);
+         index=count;
+        }
+
+      m_volatility_records[index].symbol=symbol;
+      m_volatility_records[index].timeframe=timeframe;
+      m_volatility_records[index].snapshot_type="Volatility";
+      m_volatility_records[index].snapshot_version=snapshot.snapshot_version;
+      m_volatility_records[index].updated_at=snapshot.updated_at;
+      m_volatility_records[index].is_valid=snapshot.is_valid;
+      m_volatility_records[index].volatility=snapshot;
+      return(true);
+     }
+
+   bool              GetVolatilitySnapshot(const string symbol,
+                                           const ENUM_TIMEFRAMES timeframe,
+                                           SVolatilitySnapshot &snapshot)
+     {
+      const int index=FindVolatilityIndex(symbol,timeframe);
+      if(index<0)
+         return(false);
+      snapshot=m_volatility_records[index].volatility;
+      return(true);
+     }
+
+   bool              HasVolatilitySnapshot(const string symbol,
+                                           const ENUM_TIMEFRAMES timeframe)
+     {
+      return(FindVolatilityIndex(symbol,timeframe)>=0);
+     }
+
+   int               VolatilitySnapshotCount(void)
+     {
+      return(ArraySize(m_volatility_records));
      }
 
    //--- Adds or replaces one typed Common Confidence snapshot for a stable
@@ -251,6 +332,7 @@ public:
    void              Clear(void)
      {
       ArrayFree(m_environment_records);
+      ArrayFree(m_volatility_records);
       ArrayFree(m_confidence_records);
       ArrayFree(m_decision_score_records);
      }

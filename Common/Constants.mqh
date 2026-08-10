@@ -22,6 +22,10 @@
 #define FENX_DATABUS_KEY_ENVIRONMENT_VOLATILITY_SCORE  "Environment.Volatility.Score"
 #define FENX_DATABUS_KEY_ENVIRONMENT_VOLATILITY_LEVEL  "Environment.Volatility.Level"
 
+//--- Typed-only Common Volatility snapshot contract. No new DataBus key is
+//--- introduced; legacy Environment.Volatility.* remains authoritative.
+#define FENX_COMMON_VOLATILITY_SNAPSHOT_VERSION         "1.0"
+
 //--- Environment range-analysis DataBus keys
 #define FENX_DATABUS_KEY_ENVIRONMENT_RANGE_UPPER          "Environment.Range.Upper"
 #define FENX_DATABUS_KEY_ENVIRONMENT_RANGE_LOWER          "Environment.Range.Lower"

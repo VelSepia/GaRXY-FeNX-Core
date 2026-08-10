@@ -6,6 +6,7 @@
 
 #include "../Common/Constants.mqh"
 #include "../Common/Logger.mqh"
+#include "../Common/CommonSnapshotStore.mqh"
 #include "../Engine/BaseEngine.mqh"
 
 //--- Publishes ATR-based market-volatility facts without trading decisions.
@@ -17,6 +18,9 @@ private:
    int    m_baseline_samples;
    double m_low_score;
    double m_high_score;
+   int    m_freshness_limit_seconds;
+   bool   m_consistency_verified;
+   CCommonSnapshotStore *m_snapshot_store;
 
    bool ReadSnapshot(double &atr,double &score)
      {
@@ -61,6 +65,73 @@ private:
       return(m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_VOLATILITY_LEVEL,level));
      }
 
+   //--- Builds a typed mirror from the values already published to the legacy
+   //--- DataBus. Numeric precision deliberately matches the existing strings,
+   //--- so the two interfaces expose exactly the same source facts.
+   bool BuildTypedSnapshot(const double atr,const double score,const string level,
+                           SVolatilitySnapshot &snapshot)
+     {
+      const datetime observed_at=TimeCurrent();
+      const int symbol_digits=(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS);
+      CVolatilitySnapshotContract contract;
+      contract.Reset(snapshot,_Symbol,_Period,observed_at,m_atr_period,0,
+                     m_baseline_samples);
+      snapshot.atr=StringToDouble(DoubleToString(atr,symbol_digits));
+      snapshot.volatility_score=StringToDouble(DoubleToString(score,2));
+      snapshot.volatility_level=level;
+      snapshot.source_updated_at=observed_at;
+      snapshot.source_bar_time=iTime(_Symbol,_Period,0);
+      return(contract.Finalize(snapshot,observed_at,m_freshness_limit_seconds));
+     }
+
+   bool SameTypedSnapshot(const SVolatilitySnapshot &left,
+                          const SVolatilitySnapshot &right)
+     {
+      return(left.symbol==right.symbol && left.timeframe==right.timeframe &&
+             left.snapshot_version==right.snapshot_version &&
+             left.updated_at==right.updated_at &&
+             left.is_valid==right.is_valid && left.is_fresh==right.is_fresh &&
+             left.invalid_reason==right.invalid_reason && left.atr==right.atr &&
+             left.volatility_score==right.volatility_score &&
+             left.volatility_level==right.volatility_level &&
+             left.source_updated_at==right.source_updated_at &&
+             left.source_bar_time==right.source_bar_time &&
+             left.atr_period==right.atr_period &&
+             left.atr_shift==right.atr_shift &&
+             left.baseline_samples==right.baseline_samples);
+     }
+
+   //--- Stores the typed mirror and, on its first success, verifies it against
+   //--- both the stored payload and the three unchanged legacy DataBus values.
+   bool StoreTypedSnapshot(const SVolatilitySnapshot &snapshot)
+     {
+      if(m_snapshot_store==NULL ||
+         !m_snapshot_store.SetVolatilitySnapshot(_Symbol,_Period,snapshot))
+         return(false);
+      if(m_consistency_verified)
+         return(true);
+
+      SVolatilitySnapshot stored;
+      if(!m_snapshot_store.GetVolatilitySnapshot(_Symbol,_Period,stored) ||
+         !SameTypedSnapshot(snapshot,stored))
+         return(false);
+
+      string atr_text="";
+      string score_text="";
+      string level_text="";
+      const int symbol_digits=(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS);
+      if(m_data_bus==NULL ||
+         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_ATR,atr_text) ||
+         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_VOLATILITY_SCORE,
+                                score_text) ||
+         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_VOLATILITY_LEVEL,
+                                level_text))
+         return(false);
+      return(atr_text==DoubleToString(snapshot.atr,symbol_digits) &&
+             score_text==DoubleToString(snapshot.volatility_score,2) &&
+             level_text==snapshot.volatility_level);
+     }
+
 public:
                      CVolatilityAnalyzer(void)
      {
@@ -70,10 +141,28 @@ public:
       m_baseline_samples=0;
       m_low_score=0.0;
       m_high_score=0.0;
+      m_freshness_limit_seconds=0;
+      m_consistency_verified=false;
+      m_snapshot_store=NULL;
+     }
+
+   //--- Injects the non-owning typed store before framework initialization.
+   //--- Legacy DataBus publication remains mandatory and authoritative.
+   bool              SetSnapshotStore(CCommonSnapshotStore &snapshot_store)
+     {
+      if(m_initialized)
+         return(false);
+      m_snapshot_store=GetPointer(snapshot_store);
+      return(m_snapshot_store!=NULL);
      }
 
    virtual bool       Initialize(CDataBus &data_bus,CParameterManager &parameters)
      {
+      if(m_snapshot_store==NULL)
+        {
+         CLogger::Error("VolatilityAnalyzer requires CommonSnapshotStore before initialization.");
+         return(false);
+        }
       if(!CBaseEngine::Initialize(data_bus,parameters))
          return(false);
 
@@ -81,9 +170,11 @@ public:
       m_baseline_samples=parameters.VolatilityBaselineSamples();
       m_low_score=parameters.VolatilityLowScore();
       m_high_score=parameters.VolatilityHighScore();
+      m_freshness_limit_seconds=parameters.RiskStaleDataLimitSeconds();
 
       if(m_atr_period<=0 || m_baseline_samples<=0 ||
-         m_low_score<0.0 || m_high_score<=m_low_score)
+         m_low_score<0.0 || m_high_score<=m_low_score ||
+         m_freshness_limit_seconds<=0)
         {
          CLogger::Error("VolatilityAnalyzer received invalid configuration.");
          CBaseEngine::Shutdown();
@@ -120,7 +211,28 @@ public:
 
       const string level=Classify(score);
       if(!PublishSnapshot(atr,score,level))
+        {
          CLogger::Error("VolatilityAnalyzer could not publish its snapshot to DataBus.");
+         return;
+        }
+
+      SVolatilitySnapshot snapshot;
+      if(!BuildTypedSnapshot(atr,score,level,snapshot) ||
+         !StoreTypedSnapshot(snapshot))
+        {
+         CLogger::Error("VolatilityAnalyzer could not store or verify its typed snapshot.");
+         return;
+        }
+
+      if(!m_consistency_verified)
+        {
+         CLogger::Info(StringFormat(
+            "[COMMON_VOLATILITY] typed_databus_consistency=PASS;symbol=%s;timeframe=%s;store_count=%d;keys=0;atr_period=%d;atr_shift=%d;baseline_samples=%d",
+            snapshot.symbol,snapshot.timeframe,
+            m_snapshot_store.VolatilitySnapshotCount(),snapshot.atr_period,
+            snapshot.atr_shift,snapshot.baseline_samples));
+         m_consistency_verified=true;
+        }
      }
 
    virtual void       Shutdown(void)
@@ -131,6 +243,7 @@ public:
          m_atr_handle=INVALID_HANDLE;
         }
 
+      m_consistency_verified=false;
       CBaseEngine::Shutdown();
      }
 
