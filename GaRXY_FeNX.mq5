@@ -126,6 +126,11 @@ int OnInit()
       CLogger::Error("Unable to attach CommonSnapshotStore to RangeDetector.");
       return(INIT_FAILED);
      }
+   if(!g_trend_detector.SetSnapshotStore(g_common_snapshot_store))
+     {
+      CLogger::Error("Unable to attach CommonSnapshotStore to TrendDetector.");
+      return(INIT_FAILED);
+     }
    if(!g_environment_engine.SetSnapshotStore(g_common_snapshot_store))
      {
       CLogger::Error("Unable to attach CommonSnapshotStore to EnvironmentEngine.");

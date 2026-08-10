@@ -53,6 +53,10 @@
 #define FENX_DATABUS_KEY_ENVIRONMENT_TREND_DATA_VALID     "Environment.Trend.IsDataValid"
 #define FENX_DATABUS_KEY_ENVIRONMENT_TREND_UPDATED_AT     "Environment.Trend.UpdatedAt"
 
+//--- Typed-only Common Trend snapshot contract. Existing
+//--- Environment.Trend.* keys remain the authoritative trading interface.
+#define FENX_COMMON_TREND_SNAPSHOT_VERSION                "1.0"
+
 //--- Unified market-state DataBus keys
 #define FENX_DATABUS_KEY_ENVIRONMENT_MARKET_STATE         "Environment.Market.State"
 #define FENX_DATABUS_KEY_ENVIRONMENT_MARKET_CONFIDENCE    "Environment.Market.Confidence"

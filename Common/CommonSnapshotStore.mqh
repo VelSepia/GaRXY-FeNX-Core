@@ -7,6 +7,7 @@
 #include "../Environment/EnvironmentSnapshot.mqh"
 #include "../Environment/VolatilitySnapshot.mqh"
 #include "../Environment/RangeSnapshot.mqh"
+#include "../Environment/TrendSnapshot.mqh"
 #include "../Confidence/ConfidenceSnapshot.mqh"
 #include "../Decision/DecisionScoreSnapshot.mqh"
 
@@ -46,6 +47,18 @@ struct SCommonRangeSnapshotRecord
    SRangeSnapshot range;
   };
 
+//--- Metadata and typed payload for one Common Trend identity.
+struct SCommonTrendSnapshotRecord
+  {
+   string          symbol;
+   ENUM_TIMEFRAMES timeframe;
+   string          snapshot_type;
+   string          snapshot_version;
+   datetime        updated_at;
+   bool            is_valid;
+   STrendSnapshot  trend;
+  };
+
 //--- Metadata and typed payload for one Common Confidence identity.
 struct SCommonConfidenceSnapshotRecord
   {
@@ -79,6 +92,7 @@ private:
    SCommonEnvironmentSnapshotRecord m_environment_records[];
    SCommonVolatilitySnapshotRecord  m_volatility_records[];
    SCommonRangeSnapshotRecord       m_range_records[];
+   SCommonTrendSnapshotRecord       m_trend_records[];
    SCommonConfidenceSnapshotRecord  m_confidence_records[];
    SCommonDecisionScoreSnapshotRecord m_decision_score_records[];
 
@@ -137,6 +151,18 @@ private:
         {
          if(m_range_records[index].symbol==symbol &&
             m_range_records[index].timeframe==timeframe)
+            return(index);
+        }
+      return(-1);
+     }
+
+   int               FindTrendIndex(const string symbol,
+                                    const ENUM_TIMEFRAMES timeframe)
+     {
+      for(int index=0;index<ArraySize(m_trend_records);index++)
+        {
+         if(m_trend_records[index].symbol==symbol &&
+            m_trend_records[index].timeframe==timeframe)
             return(index);
         }
       return(-1);
@@ -302,6 +328,59 @@ public:
       return(ArraySize(m_range_records));
      }
 
+   //--- Adds or replaces one typed Common Trend snapshot without calculating
+   //--- or modifying any of the source detector values.
+   bool              SetTrendSnapshot(const string symbol,
+                                      const ENUM_TIMEFRAMES timeframe,
+                                      const STrendSnapshot &snapshot)
+     {
+      if(StringLen(symbol)==0 || PeriodSeconds(timeframe)<=0 ||
+         snapshot.symbol!=symbol ||
+         snapshot.timeframe!=EnumToString(timeframe) ||
+         StringLen(snapshot.snapshot_version)==0 || snapshot.updated_at<=0)
+         return(false);
+
+      int index=FindTrendIndex(symbol,timeframe);
+      if(index<0)
+        {
+         const int count=ArraySize(m_trend_records);
+         if(ArrayResize(m_trend_records,count+1)!=(count+1))
+            return(false);
+         index=count;
+        }
+
+      m_trend_records[index].symbol=symbol;
+      m_trend_records[index].timeframe=timeframe;
+      m_trend_records[index].snapshot_type="Trend";
+      m_trend_records[index].snapshot_version=snapshot.snapshot_version;
+      m_trend_records[index].updated_at=snapshot.updated_at;
+      m_trend_records[index].is_valid=snapshot.is_valid;
+      m_trend_records[index].trend=snapshot;
+      return(true);
+     }
+
+   bool              GetTrendSnapshot(const string symbol,
+                                      const ENUM_TIMEFRAMES timeframe,
+                                      STrendSnapshot &snapshot)
+     {
+      const int index=FindTrendIndex(symbol,timeframe);
+      if(index<0)
+         return(false);
+      snapshot=m_trend_records[index].trend;
+      return(true);
+     }
+
+   bool              HasTrendSnapshot(const string symbol,
+                                      const ENUM_TIMEFRAMES timeframe)
+     {
+      return(FindTrendIndex(symbol,timeframe)>=0);
+     }
+
+   int               TrendSnapshotCount(void)
+     {
+      return(ArraySize(m_trend_records));
+     }
+
    //--- Adds or replaces one typed Common Confidence snapshot for a stable
    //--- Symbol+Timeframe identity without altering Environment records.
    bool              SetConfidenceSnapshot(const string symbol,
@@ -413,6 +492,7 @@ public:
       ArrayFree(m_environment_records);
       ArrayFree(m_volatility_records);
       ArrayFree(m_range_records);
+      ArrayFree(m_trend_records);
       ArrayFree(m_confidence_records);
       ArrayFree(m_decision_score_records);
      }
