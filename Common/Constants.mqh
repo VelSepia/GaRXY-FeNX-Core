@@ -286,6 +286,10 @@
 #define FENX_DATABUS_KEY_RISK_SYSTEM_DATA_VALID                    "Risk.SystemRiskDataValid"
 #define FENX_DATABUS_KEY_RISK_SYSTEM_UPDATED_AT                    "Risk.SystemRiskUpdatedAt"
 
+//--- Typed-only Common Risk snapshot contract. Existing Risk global and
+//--- Risk.<symbol>.* DataBus interfaces remain authoritative for trading.
+#define FENX_COMMON_RISK_SNAPSHOT_VERSION                          "1.0"
+
 //--- Per-symbol Minimal Execution System DataBus namespace and field names
 #define FENX_DATABUS_NAMESPACE_EXECUTION                           "Execution"
 #define FENX_DATABUS_FIELD_EXECUTION_GATE_ALLOWED                  "ExecutionGateAllowed"

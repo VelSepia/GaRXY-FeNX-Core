@@ -6,6 +6,7 @@
 
 #include "../Common/Constants.mqh"
 #include "../Common/Logger.mqh"
+#include "../Common/CommonSnapshotStore.mqh"
 #include "../Engine/BaseEngine.mqh"
 
 //--- Environment facts consumed from CDataBus only.
@@ -83,24 +84,6 @@ struct SRiskRuntime
    int      recovery_confirmation_count;
   };
 
-//--- Per-symbol final risk recommendation; it never represents an execution command.
-struct SRiskSnapshot
-  {
-   string   symbol;
-   string   state;
-   string   action;
-   bool     is_risk_approved;
-   bool     are_new_entries_risk_approved;
-   double   allocation_multiplier;
-   double   score;
-   double   confidence;
-   string   reason;
-   bool     preserve_existing_positions;
-   bool     escalation_required;
-   bool     data_valid;
-   datetime updated_at;
-  };
-
 //--- System-level final risk recommendation.
 struct SSystemRiskSnapshot
   {
@@ -144,6 +127,8 @@ private:
    int           m_transition_cooldown_seconds;
    double        m_caution_allocation_multiplier;
    double        m_reduced_allocation_multiplier;
+   bool          m_consistency_verified;
+   CCommonSnapshotStore *m_snapshot_store;
 
    double ClampPercent(const double value)
      {
@@ -191,6 +176,38 @@ private:
       pipeline.standby_risk_stop_count=0;
      }
 
+   //--- Initializes source storage for typed diagnostics when a legacy input
+   //--- read fails. These defaults never enter a Risk calculation.
+   void ResetInput(SRiskInput &source,const string symbol)
+     {
+      source.symbol=symbol;
+      source.is_market_eligible=false;
+      source.market_selection_updated_at=0;
+      source.is_pair_ranked=false;
+      source.pair_rank=0;
+      source.pair_ranking_score=0.0;
+      source.pair_ranking_confidence=0.0;
+      source.pair_ranking_updated_at=0;
+      source.is_capital_allocated=false;
+      source.capital_allocation_percent=0.0;
+      source.capital_allocation_updated_at=0;
+      source.trading_style="";
+      source.trading_style_confidence=0.0;
+      source.is_trading_style_valid=false;
+      source.trading_style_updated_at=0;
+      source.selected_strategy="";
+      source.strategy_selection_confidence=0.0;
+      source.is_strategy_selection_valid=false;
+      source.strategy_selection_updated_at=0;
+      source.standby_state="";
+      source.is_standby_active=false;
+      source.are_new_entries_allowed=false;
+      source.standby_escalation_score=0.0;
+      source.standby_recommended_next_state="";
+      source.standby_data_valid=false;
+      source.standby_updated_at=0;
+     }
+
    void ResetSnapshot(SRiskSnapshot &snapshot,const string symbol)
      {
       snapshot.symbol=symbol;
@@ -206,6 +223,34 @@ private:
       snapshot.escalation_required=true;
       snapshot.data_valid=false;
       snapshot.updated_at=TimeCurrent();
+      snapshot.timeframe=EnumToString(_Period);
+      snapshot.snapshot_version=FENX_COMMON_RISK_SNAPSHOT_VERSION;
+      snapshot.is_valid=false;
+      snapshot.is_fresh=false;
+      snapshot.invalid_reason="";
+      snapshot.system_risk_state="SYSTEM_RISK_STOP_REQUIRED";
+      snapshot.symbol_risk_state=snapshot.state;
+      snapshot.system_entry_allowed=false;
+      snapshot.symbol_entry_allowed=false;
+      snapshot.risk_stop_requested=true;
+      snapshot.risk_stop_active=false;
+      snapshot.risk_stop_reason=snapshot.reason;
+      snapshot.risk_stop_started_at=0;
+      snapshot.recovery_allowed=false;
+      snapshot.recovery_condition_met=false;
+      snapshot.recovery_confirmation_count=0;
+      snapshot.required_confirmation_count=m_recovery_confirmation_count;
+      snapshot.recovery_started_at=0;
+      snapshot.recovery_started_at_available=false;
+      snapshot.cooldown_until=0;
+      snapshot.hysteresis_state=snapshot.state;
+      snapshot.standby_state="";
+      snapshot.standby_entry_allowed=false;
+      snapshot.market_state="TRANSITION";
+      snapshot.strategy="";
+      snapshot.allocation_state="NOT_ALLOCATED";
+      snapshot.source_updated_at=0;
+      snapshot.state_manager_state="INIT";
      }
 
    void ResetSystemSnapshot(SSystemRiskSnapshot &snapshot)
@@ -609,6 +654,26 @@ private:
              IsTimestampFresh(source.standby_updated_at));
      }
 
+   //--- Returns the oldest required publisher timestamp without introducing
+   //--- a new freshness source or changing the existing freshness decision.
+   datetime OldestTimestamp(const datetime &values[])
+     {
+      const int count=ArraySize(values);
+      if(count<=0)
+         return(0);
+      datetime oldest=values[0];
+      if(oldest<=0)
+         return(0);
+      for(int index=1;index<count;index++)
+        {
+         if(values[index]<=0)
+            return(0);
+         if(values[index]<oldest)
+            oldest=values[index];
+        }
+      return(oldest);
+     }
+
    //--- Append one diagnostic token without obscuring the first failure.
    void AppendDiagnostic(string &diagnostic,const string value)
      {
@@ -944,6 +1009,57 @@ private:
       snapshot.updated_at=TimeCurrent();
      }
 
+   //--- Copies existing Risk runtime and upstream facts into the typed-only
+   //--- extension. It observes the legacy candidate/hysteresis calculation
+   //--- and never feeds a value back into that calculation.
+   void PopulateTypedObservation(SRiskSnapshot &snapshot,
+                                 const SRiskRuntime &runtime,
+                                 const SRiskEnvironment &environment,
+                                 const SRiskPipeline &pipeline,
+                                 const SRiskInput &source,
+                                 const bool input_available,
+                                 const bool recovery_condition_met,
+                                 const bool recovery_allowed)
+     {
+      snapshot.symbol_risk_state=snapshot.state;
+      snapshot.symbol_entry_allowed=snapshot.are_new_entries_risk_approved;
+      snapshot.risk_stop_requested=(snapshot.state=="RISK_STOP_REQUIRED" ||
+                                    snapshot.action=="REQUEST_RISK_STOP");
+      snapshot.risk_stop_reason=(snapshot.risk_stop_requested ?
+                                 snapshot.reason : "");
+      snapshot.risk_stop_started_at=(snapshot.state=="RISK_STOP_REQUIRED" ?
+                                     runtime.state_changed_at : 0);
+      snapshot.recovery_condition_met=recovery_condition_met;
+      snapshot.recovery_allowed=recovery_allowed;
+      snapshot.recovery_confirmation_count=runtime.recovery_confirmation_count;
+      snapshot.required_confirmation_count=m_recovery_confirmation_count;
+      snapshot.recovery_started_at=0;
+      snapshot.recovery_started_at_available=false;
+      snapshot.cooldown_until=(runtime.state_changed_at>0 ?
+                               runtime.state_changed_at+
+                               m_transition_cooldown_seconds : 0);
+      snapshot.hysteresis_state=runtime.state;
+      snapshot.standby_state=(input_available ? source.standby_state : "");
+      snapshot.standby_entry_allowed=(input_available ?
+                                      source.are_new_entries_allowed : false);
+      snapshot.market_state=environment.market_state;
+      snapshot.strategy=(input_available ? source.selected_strategy : "");
+      snapshot.allocation_state=(input_available && source.is_capital_allocated ?
+                                 "ALLOCATED" : "NOT_ALLOCATED");
+      const datetime source_times[14]=
+        {
+         environment.market_updated_at,environment.range_updated_at,
+         environment.trend_updated_at,pipeline.pair_ranking_updated_at,
+         pipeline.allocation_updated_at,pipeline.style_updated_at,
+         pipeline.strategy_updated_at,pipeline.standby_updated_at,
+         source.market_selection_updated_at,source.pair_ranking_updated_at,
+         source.capital_allocation_updated_at,source.trading_style_updated_at,
+         source.strategy_selection_updated_at,source.standby_updated_at
+        };
+      snapshot.source_updated_at=(input_available ?
+                                  OldestTimestamp(source_times) : 0);
+     }
+
    bool PublishSnapshot(const SRiskSnapshot &snapshot)
      {
       if(m_data_bus==NULL)
@@ -1083,6 +1199,234 @@ private:
       return(success);
      }
 
+   bool SameTypedSnapshot(const SRiskSnapshot &left,
+                          const SRiskSnapshot &right)
+     {
+      return(left.symbol==right.symbol && left.state==right.state &&
+             left.action==right.action &&
+             left.is_risk_approved==right.is_risk_approved &&
+             left.are_new_entries_risk_approved==
+                right.are_new_entries_risk_approved &&
+             left.allocation_multiplier==right.allocation_multiplier &&
+             left.score==right.score && left.confidence==right.confidence &&
+             left.reason==right.reason &&
+             left.preserve_existing_positions==
+                right.preserve_existing_positions &&
+             left.escalation_required==right.escalation_required &&
+             left.data_valid==right.data_valid &&
+             left.updated_at==right.updated_at &&
+             left.timeframe==right.timeframe &&
+             left.snapshot_version==right.snapshot_version &&
+             left.is_valid==right.is_valid && left.is_fresh==right.is_fresh &&
+             left.invalid_reason==right.invalid_reason &&
+             left.system_risk_state==right.system_risk_state &&
+             left.symbol_risk_state==right.symbol_risk_state &&
+             left.system_entry_allowed==right.system_entry_allowed &&
+             left.symbol_entry_allowed==right.symbol_entry_allowed &&
+             left.risk_stop_requested==right.risk_stop_requested &&
+             left.risk_stop_active==right.risk_stop_active &&
+             left.risk_stop_reason==right.risk_stop_reason &&
+             left.risk_stop_started_at==right.risk_stop_started_at &&
+             left.recovery_allowed==right.recovery_allowed &&
+             left.recovery_condition_met==right.recovery_condition_met &&
+             left.recovery_confirmation_count==
+                right.recovery_confirmation_count &&
+             left.required_confirmation_count==
+                right.required_confirmation_count &&
+             left.recovery_started_at==right.recovery_started_at &&
+             left.recovery_started_at_available==
+                right.recovery_started_at_available &&
+             left.cooldown_until==right.cooldown_until &&
+             left.hysteresis_state==right.hysteresis_state &&
+             left.standby_state==right.standby_state &&
+             left.standby_entry_allowed==right.standby_entry_allowed &&
+             left.market_state==right.market_state &&
+             left.strategy==right.strategy &&
+             left.allocation_state==right.allocation_state &&
+             left.source_updated_at==right.source_updated_at &&
+             left.state_manager_state==right.state_manager_state);
+     }
+
+   bool RiskDecisionChanged(const SRiskSnapshot &previous,
+                            const SRiskSnapshot &current)
+     {
+      return(previous.state!=current.state ||
+             previous.action!=current.action ||
+             previous.are_new_entries_risk_approved!=
+                current.are_new_entries_risk_approved ||
+             previous.allocation_multiplier!=current.allocation_multiplier ||
+             previous.system_risk_state!=current.system_risk_state ||
+             previous.system_entry_allowed!=current.system_entry_allowed ||
+             previous.risk_stop_requested!=current.risk_stop_requested ||
+             previous.risk_stop_active!=current.risk_stop_active ||
+             previous.recovery_condition_met!=current.recovery_condition_met ||
+             previous.state_manager_state!=current.state_manager_state);
+     }
+
+   //--- Confirms every existing symbol and global DataBus field against the
+   //--- same finalized records used by the typed snapshot.
+   bool VerifyDataBusSnapshot(const SRiskSnapshot &snapshot,
+                              const SSystemRiskSnapshot &system_snapshot)
+     {
+      if(m_data_bus==NULL)
+         return(false);
+      string state="",action="",approved="",entry_allowed="",multiplier="";
+      string score="",confidence="",reason="",preserve="",escalation="";
+      string data_valid="",updated="";
+      string system_state="",system_score="",system_confidence="";
+      string trading_allowed="",system_entries="",system_multiplier="";
+      string suspended="",risk_stops="",invalid="",system_reason="";
+      string system_valid="",system_updated="";
+      return(m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_RISK,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_SYMBOL_RISK_STATE,
+                                         state) &&
+             m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_RISK,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_RISK_ACTION,action) &&
+             m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_RISK,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_IS_RISK_APPROVED,
+                                         approved) &&
+             m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_RISK,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_NEW_ENTRIES_RISK_APPROVED,
+                                         entry_allowed) &&
+             m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_RISK,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_RECOMMENDED_ALLOCATION_MULTIPLIER,
+                                         multiplier) &&
+             m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_RISK,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_RISK_SCORE,score) &&
+             m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_RISK,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_RISK_CONFIDENCE,
+                                         confidence) &&
+             m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_RISK,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_RISK_REASON,reason) &&
+             m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_RISK,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_RISK_PRESERVE_POSITIONS,
+                                         preserve) &&
+             m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_RISK,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_RISK_ESCALATION_REQUIRED,
+                                         escalation) &&
+             m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_RISK,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_RISK_DATA_VALID,
+                                         data_valid) &&
+             m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_RISK,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_RISK_UPDATED_AT,updated) &&
+             m_data_bus.TryGetText(FENX_DATABUS_KEY_RISK_SYSTEM_STATE,
+                                   system_state) &&
+             m_data_bus.TryGetText(FENX_DATABUS_KEY_RISK_SYSTEM_SCORE,
+                                   system_score) &&
+             m_data_bus.TryGetText(FENX_DATABUS_KEY_RISK_SYSTEM_CONFIDENCE,
+                                   system_confidence) &&
+             m_data_bus.TryGetText(FENX_DATABUS_KEY_RISK_SYSTEM_TRADING_ALLOWED,
+                                   trading_allowed) &&
+             m_data_bus.TryGetText(FENX_DATABUS_KEY_RISK_SYSTEM_NEW_ENTRIES_ALLOWED,
+                                   system_entries) &&
+             m_data_bus.TryGetText(FENX_DATABUS_KEY_RISK_SYSTEM_ALLOCATION_MULTIPLIER,
+                                   system_multiplier) &&
+             m_data_bus.TryGetText(FENX_DATABUS_KEY_RISK_SUSPENDED_SYMBOL_COUNT,
+                                   suspended) &&
+             m_data_bus.TryGetText(FENX_DATABUS_KEY_RISK_STOP_REQUIRED_COUNT,
+                                   risk_stops) &&
+             m_data_bus.TryGetText(FENX_DATABUS_KEY_RISK_INVALID_SYMBOL_COUNT,
+                                   invalid) &&
+             m_data_bus.TryGetText(FENX_DATABUS_KEY_RISK_SYSTEM_REASON,
+                                   system_reason) &&
+             m_data_bus.TryGetText(FENX_DATABUS_KEY_RISK_SYSTEM_DATA_VALID,
+                                   system_valid) &&
+             m_data_bus.TryGetText(FENX_DATABUS_KEY_RISK_SYSTEM_UPDATED_AT,
+                                   system_updated) &&
+             state==snapshot.state && action==snapshot.action &&
+             approved==(snapshot.is_risk_approved ? "true" : "false") &&
+             entry_allowed==(snapshot.are_new_entries_risk_approved ?
+                            "true" : "false") &&
+             multiplier==DoubleToString(snapshot.allocation_multiplier,2) &&
+             score==DoubleToString(snapshot.score,2) &&
+             confidence==DoubleToString(snapshot.confidence,2) &&
+             reason==snapshot.reason && preserve=="true" &&
+             escalation==(snapshot.escalation_required ? "true" : "false") &&
+             data_valid==(snapshot.data_valid ? "true" : "false") &&
+             updated==TimeToString(snapshot.updated_at,TIME_DATE|TIME_SECONDS) &&
+             system_state==system_snapshot.state &&
+             system_score==DoubleToString(system_snapshot.score,2) &&
+             system_confidence==DoubleToString(system_snapshot.confidence,2) &&
+             trading_allowed==(system_snapshot.trading_allowed ? "true" : "false") &&
+             system_entries==(system_snapshot.new_entries_allowed ? "true" : "false") &&
+             system_multiplier==DoubleToString(system_snapshot.allocation_multiplier,2) &&
+             suspended==IntegerToString(system_snapshot.suspended_symbol_count) &&
+             risk_stops==IntegerToString(system_snapshot.risk_stop_required_count) &&
+             invalid==IntegerToString(system_snapshot.invalid_symbol_count) &&
+             system_reason==system_snapshot.reason &&
+             system_valid==(system_snapshot.data_valid ? "true" : "false") &&
+             system_updated==TimeToString(system_snapshot.updated_at,
+                                          TIME_DATE|TIME_SECONDS));
+     }
+
+   void LogTypedTelemetry(const string event_name,
+                          const SRiskSnapshot &snapshot)
+     {
+      string risk_stop_reason=snapshot.risk_stop_reason;
+      StringReplace(risk_stop_reason,";",",");
+      CLogger::Info(StringFormat(
+         "[COMMON_RISK] event=%s;Time=%s;Symbol=%s;RiskState=%s;RiskAction=%s;EntryAllowed=%s;LotMultiplier=%.2f;RiskScore=%.2f;RiskConfidence=%.2f;RiskStopRequested=%s;RiskStopActive=%s;RiskStopReason=%s;RecoveryCondition=%s;RecoveryConfirmationCount=%d;StateManagerState=%s;SnapshotUpdatedAt=%s;store_count=%d;keys=0",
+         event_name,TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS),
+         snapshot.symbol,snapshot.state,snapshot.action,
+         (snapshot.are_new_entries_risk_approved ? "true" : "false"),
+         snapshot.allocation_multiplier,snapshot.score,snapshot.confidence,
+         (snapshot.risk_stop_requested ? "true" : "false"),
+         (snapshot.risk_stop_active ? "true" : "false"),risk_stop_reason,
+         (snapshot.recovery_condition_met ? "true" : "false"),
+         snapshot.recovery_confirmation_count,snapshot.state_manager_state,
+         TimeToString(snapshot.updated_at,TIME_DATE|TIME_SECONDS),
+         m_snapshot_store.RiskSnapshotCount()));
+     }
+
+   bool StoreTypedSnapshot(SRiskSnapshot &snapshot,
+                           const SSystemRiskSnapshot &system_snapshot)
+     {
+      if(m_snapshot_store==NULL)
+         return(false);
+
+      snapshot.system_risk_state=system_snapshot.state;
+      snapshot.system_entry_allowed=system_snapshot.new_entries_allowed;
+      snapshot.state_manager_state=(m_state_manager==NULL ? "INIT" :
+         m_state_manager.StateName(m_state_manager.GetState()));
+      snapshot.risk_stop_active=(snapshot.state_manager_state=="RISK_STOP");
+      CRiskSnapshotContract contract;
+      contract.Finalize(snapshot,TimeCurrent(),m_stale_data_limit_seconds);
+
+      SRiskSnapshot previous;
+      const bool had_previous=m_snapshot_store.GetRiskSnapshot(
+         snapshot.symbol,_Period,previous);
+      if(!m_snapshot_store.SetRiskSnapshot(snapshot.symbol,_Period,snapshot))
+         return(false);
+
+      SRiskSnapshot stored;
+      if(!m_snapshot_store.GetRiskSnapshot(snapshot.symbol,_Period,stored) ||
+         !SameTypedSnapshot(snapshot,stored))
+         return(false);
+
+      if(!m_consistency_verified)
+        {
+         if(!VerifyDataBusSnapshot(snapshot,system_snapshot))
+            return(false);
+         LogTypedTelemetry("CONSISTENCY_PASS",snapshot);
+         m_consistency_verified=true;
+        }
+      else if(had_previous && RiskDecisionChanged(previous,snapshot))
+         LogTypedTelemetry("DECISION_CHANGE",snapshot);
+      return(true);
+     }
+
    //--- Core recovery requires the already-hysteretic final system state plus
    //--- complete valid inputs and the absence of every escalation or entry block.
    bool IsCoreRecoveryConfirmed(const SSystemRiskSnapshot &system_snapshot,
@@ -1166,10 +1510,27 @@ public:
       m_transition_cooldown_seconds=0;
       m_caution_allocation_multiplier=0.0;
       m_reduced_allocation_multiplier=0.0;
+      m_consistency_verified=false;
+      m_snapshot_store=NULL;
+     }
+
+   //--- Injects the non-owning typed store before framework initialization.
+   //--- Existing Risk DataBus outputs remain the trading interface.
+   bool              SetSnapshotStore(CCommonSnapshotStore &snapshot_store)
+     {
+      if(m_initialized)
+         return(false);
+      m_snapshot_store=GetPointer(snapshot_store);
+      return(m_snapshot_store!=NULL);
      }
 
    virtual bool       Initialize(CDataBus &data_bus,CParameterManager &parameters)
      {
+      if(m_snapshot_store==NULL)
+        {
+         CLogger::Error("RiskEngine requires CommonSnapshotStore before initialization.");
+         return(false);
+        }
       if(!CBaseEngine::Initialize(data_bus,parameters))
          return(false);
 
@@ -1279,6 +1640,7 @@ public:
         {
          ResetSnapshot(snapshots[index],m_symbols[index]);
          SRiskInput source;
+         ResetInput(source,m_symbols[index]);
          const bool input_available=ReadSymbolInput(m_symbols[index],source);
          const bool input_fresh=(input_available && IsInputFresh(source));
          const bool data_valid=(upstream_valid && input_available && input_fresh &&
@@ -1286,6 +1648,10 @@ public:
                                 source.standby_data_valid);
          if(!input_available)
            {
+            const bool recovery_condition=(RiskStateSeverity("SUSPENDED")<
+                                           RiskStateSeverity(m_runtime[index].state));
+            const bool recovery_allowed=(recovery_condition &&
+                                          IsRiskCooldownComplete(m_runtime[index]));
             const string final_state=ApplyHysteresis(
                m_runtime[index],"SUSPENDED",m_symbols[index],
                "Required symbol-level risk records are unavailable; new entries are suspended.");
@@ -1304,15 +1670,25 @@ public:
             all_entries_allowed=false;
             all_data_valid=false;
             has_entry_block=true;
+            PopulateTypedObservation(snapshots[index],m_runtime[index],environment,
+                                     pipeline,source,false,recovery_condition,
+                                     recovery_allowed);
             continue;
            }
 
          const double score=CalculateRiskScore(environment,source,data_valid);
          const double confidence=CalculateRiskConfidence(environment,source,data_valid);
          const string candidate=CandidateState(environment,source,score,confidence,data_valid);
+         const bool recovery_condition=(RiskStateSeverity(candidate)<
+                                        RiskStateSeverity(m_runtime[index].state));
+         const bool recovery_allowed=(recovery_condition &&
+                                       IsRiskCooldownComplete(m_runtime[index]));
          const string final_state=ApplyHysteresis(m_runtime[index],candidate,m_symbols[index],
                                                   RiskReason(candidate,source,data_valid));
          BuildSnapshot(final_state,environment,source,score,confidence,data_valid,snapshots[index]);
+         PopulateTypedObservation(snapshots[index],m_runtime[index],environment,
+                                  pipeline,source,true,recovery_condition,
+                                  recovery_allowed);
          if(!data_valid)
             invalid_count++;
          if(!data_valid)
@@ -1366,12 +1742,20 @@ public:
       if(!PublishSystemSnapshot(system_snapshot))
          CLogger::Error("RiskEngine could not publish global risk data.");
       RequestCoreState(system_snapshot,has_dynamic_escalation,has_entry_block);
+      for(int index=0;index<symbol_count;index++)
+        {
+         if(!StoreTypedSnapshot(snapshots[index],system_snapshot))
+            CLogger::Error(StringFormat(
+               "RiskEngine could not store or verify the typed %s snapshot.",
+               m_symbols[index]));
+        }
      }
 
    virtual void       Shutdown(void)
      {
       ArrayFree(m_symbols);
       ArrayFree(m_runtime);
+      m_consistency_verified=false;
       CBaseEngine::Shutdown();
      }
   };
