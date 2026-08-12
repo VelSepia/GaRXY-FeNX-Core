@@ -131,6 +131,11 @@ int OnInit()
       CLogger::Error("Unable to attach CommonSnapshotStore to TrendDetector.");
       return(INIT_FAILED);
      }
+   if(!g_market_state_integrator.SetSnapshotStore(g_common_snapshot_store))
+     {
+      CLogger::Error("Unable to attach CommonSnapshotStore to MarketStateIntegrator.");
+      return(INIT_FAILED);
+     }
    if(!g_environment_engine.SetSnapshotStore(g_common_snapshot_store))
      {
       CLogger::Error("Unable to attach CommonSnapshotStore to EnvironmentEngine.");

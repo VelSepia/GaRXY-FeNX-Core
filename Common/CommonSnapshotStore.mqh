@@ -8,6 +8,7 @@
 #include "../Environment/VolatilitySnapshot.mqh"
 #include "../Environment/RangeSnapshot.mqh"
 #include "../Environment/TrendSnapshot.mqh"
+#include "../Environment/MarketStateSnapshot.mqh"
 #include "../Confidence/ConfidenceSnapshot.mqh"
 #include "../Decision/DecisionScoreSnapshot.mqh"
 
@@ -59,6 +60,18 @@ struct SCommonTrendSnapshotRecord
    STrendSnapshot  trend;
   };
 
+//--- Metadata and typed payload for one Common Market State identity.
+struct SCommonMarketStateSnapshotRecord
+  {
+   string               symbol;
+   ENUM_TIMEFRAMES      timeframe;
+   string               snapshot_type;
+   string               snapshot_version;
+   datetime             updated_at;
+   bool                 is_valid;
+   SMarketStateSnapshot market_state;
+  };
+
 //--- Metadata and typed payload for one Common Confidence identity.
 struct SCommonConfidenceSnapshotRecord
   {
@@ -93,6 +106,7 @@ private:
    SCommonVolatilitySnapshotRecord  m_volatility_records[];
    SCommonRangeSnapshotRecord       m_range_records[];
    SCommonTrendSnapshotRecord       m_trend_records[];
+   SCommonMarketStateSnapshotRecord m_market_state_records[];
    SCommonConfidenceSnapshotRecord  m_confidence_records[];
    SCommonDecisionScoreSnapshotRecord m_decision_score_records[];
 
@@ -163,6 +177,18 @@ private:
         {
          if(m_trend_records[index].symbol==symbol &&
             m_trend_records[index].timeframe==timeframe)
+            return(index);
+        }
+      return(-1);
+     }
+
+   int               FindMarketStateIndex(const string symbol,
+                                          const ENUM_TIMEFRAMES timeframe)
+     {
+      for(int index=0;index<ArraySize(m_market_state_records);index++)
+        {
+         if(m_market_state_records[index].symbol==symbol &&
+            m_market_state_records[index].timeframe==timeframe)
             return(index);
         }
       return(-1);
@@ -381,6 +407,59 @@ public:
       return(ArraySize(m_trend_records));
      }
 
+   //--- Adds or replaces one typed Common Market State snapshot. The payload
+   //--- is the already-classified legacy result; this store never classifies.
+   bool              SetMarketStateSnapshot(const string symbol,
+                                            const ENUM_TIMEFRAMES timeframe,
+                                            const SMarketStateSnapshot &snapshot)
+     {
+      if(StringLen(symbol)==0 || PeriodSeconds(timeframe)<=0 ||
+         snapshot.symbol!=symbol ||
+         snapshot.timeframe!=EnumToString(timeframe) ||
+         StringLen(snapshot.snapshot_version)==0 || snapshot.updated_at<=0)
+         return(false);
+
+      int index=FindMarketStateIndex(symbol,timeframe);
+      if(index<0)
+        {
+         const int count=ArraySize(m_market_state_records);
+         if(ArrayResize(m_market_state_records,count+1)!=(count+1))
+            return(false);
+         index=count;
+        }
+
+      m_market_state_records[index].symbol=symbol;
+      m_market_state_records[index].timeframe=timeframe;
+      m_market_state_records[index].snapshot_type="MarketState";
+      m_market_state_records[index].snapshot_version=snapshot.snapshot_version;
+      m_market_state_records[index].updated_at=snapshot.updated_at;
+      m_market_state_records[index].is_valid=snapshot.is_valid;
+      m_market_state_records[index].market_state=snapshot;
+      return(true);
+     }
+
+   bool              GetMarketStateSnapshot(const string symbol,
+                                            const ENUM_TIMEFRAMES timeframe,
+                                            SMarketStateSnapshot &snapshot)
+     {
+      const int index=FindMarketStateIndex(symbol,timeframe);
+      if(index<0)
+         return(false);
+      snapshot=m_market_state_records[index].market_state;
+      return(true);
+     }
+
+   bool              HasMarketStateSnapshot(const string symbol,
+                                            const ENUM_TIMEFRAMES timeframe)
+     {
+      return(FindMarketStateIndex(symbol,timeframe)>=0);
+     }
+
+   int               MarketStateSnapshotCount(void)
+     {
+      return(ArraySize(m_market_state_records));
+     }
+
    //--- Adds or replaces one typed Common Confidence snapshot for a stable
    //--- Symbol+Timeframe identity without altering Environment records.
    bool              SetConfidenceSnapshot(const string symbol,
@@ -493,6 +572,7 @@ public:
       ArrayFree(m_volatility_records);
       ArrayFree(m_range_records);
       ArrayFree(m_trend_records);
+      ArrayFree(m_market_state_records);
       ArrayFree(m_confidence_records);
       ArrayFree(m_decision_score_records);
      }

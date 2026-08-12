@@ -6,17 +6,8 @@
 
 #include "../Common/Constants.mqh"
 #include "../Common/Logger.mqh"
+#include "../Common/CommonSnapshotStore.mqh"
 #include "../Engine/BaseEngine.mqh"
-
-//--- Internal unified market facts. Runtime consumers receive values through CDataBus only.
-struct SMarketStateSnapshot
-  {
-   string   market_state;
-   double   confidence;
-   string   recommended_trading_style;
-   string   recommended_risk_level;
-   datetime updated_at;
-  };
 
 //--- Combines published environment facts into one non-trading market-state description.
 class CMarketStateIntegrator : public CBaseEngine
@@ -27,6 +18,9 @@ private:
    double m_trend_score_threshold;
    double m_volatility_score_threshold;
    double m_trend_min_adx;
+   int    m_freshness_limit_seconds;
+   bool   m_consistency_verified;
+   CCommonSnapshotStore *m_snapshot_store;
 
    void ResetSnapshot(SMarketStateSnapshot &snapshot)
      {
@@ -35,6 +29,30 @@ private:
       snapshot.recommended_trading_style="Standby";
       snapshot.recommended_risk_level="Low";
       snapshot.updated_at=TimeCurrent();
+      snapshot.is_data_valid=false;
+      snapshot.symbol="";
+      snapshot.timeframe="";
+      snapshot.snapshot_version="";
+      snapshot.is_valid=false;
+      snapshot.is_fresh=false;
+      snapshot.invalid_reason="";
+      snapshot.volatility_valid=false;
+      snapshot.range_valid=false;
+      snapshot.trend_valid=false;
+      snapshot.volatility_score=0.0;
+      snapshot.volatility_level="";
+      snapshot.range_score=0.0;
+      snapshot.is_range=false;
+      snapshot.trend_direction="";
+      snapshot.trend_strength=0.0;
+      snapshot.trend_score=0.0;
+      snapshot.trend_confidence=0.0;
+      snapshot.is_trend=false;
+      snapshot.source_updated_at=0;
+      snapshot.volatility_updated_at=0;
+      snapshot.range_updated_at=0;
+      snapshot.trend_updated_at=0;
+      snapshot.source_bar_time=0;
      }
 
    double ClampScore(const double value)
@@ -75,6 +93,22 @@ private:
         }
 
       return(false);
+     }
+
+   bool ReadText(const string key,string &value)
+     {
+      if(m_data_bus==NULL || !m_data_bus.TryGetText(key,value))
+         return(false);
+      return(StringLen(value)>0);
+     }
+
+   bool ReadTimestamp(const string key,datetime &value)
+     {
+      string text="";
+      if(!ReadText(key,text))
+         return(false);
+      value=StringToTime(text);
+      return(value>0);
      }
 
    bool ReadInputs(double &range_score,bool &is_range,double &trend_score,
@@ -145,6 +179,7 @@ private:
         }
 
       snapshot.updated_at=TimeCurrent();
+      snapshot.is_data_valid=true;
       return(true);
      }
 
@@ -173,6 +208,137 @@ private:
       return(success);
      }
 
+   //--- Mirrors the exact legacy source values after Market State has already
+   //--- been classified and published. These reads never participate in the
+   //--- existing classification predicates or their priority.
+   void BuildTypedSnapshot(SMarketStateSnapshot &snapshot,
+                           const double range_score,const bool is_range,
+                           const double trend_score,const double trend_strength,
+                           const double volatility_score,const double atr)
+     {
+      snapshot.symbol=_Symbol;
+      snapshot.timeframe=EnumToString(_Period);
+      snapshot.snapshot_version=FENX_COMMON_MARKET_STATE_SNAPSHOT_VERSION;
+      snapshot.is_valid=false;
+      snapshot.is_fresh=false;
+      snapshot.invalid_reason="";
+      snapshot.range_score=range_score;
+      snapshot.is_range=is_range;
+      snapshot.trend_score=trend_score;
+      snapshot.trend_strength=trend_strength;
+      snapshot.volatility_score=volatility_score;
+
+      bool range_source_valid=false;
+      bool trend_source_valid=false;
+      const bool range_valid_read=
+         ReadBoolean(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_DATA_VALID,
+                     range_source_valid);
+      const bool trend_valid_read=
+         ReadBoolean(FENX_DATABUS_KEY_ENVIRONMENT_TREND_DATA_VALID,
+                     trend_source_valid);
+      const bool volatility_level_read=
+         ReadText(FENX_DATABUS_KEY_ENVIRONMENT_VOLATILITY_LEVEL,
+                  snapshot.volatility_level);
+      const bool trend_direction_read=
+         ReadText(FENX_DATABUS_KEY_ENVIRONMENT_TREND_DIRECTION,
+                  snapshot.trend_direction);
+      const bool trend_confidence_read=
+         ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_TREND_CONFIDENCE,
+                    snapshot.trend_confidence);
+      const bool is_trend_read=
+         ReadBoolean(FENX_DATABUS_KEY_ENVIRONMENT_IS_TREND,snapshot.is_trend);
+      const bool range_time_read=
+         ReadTimestamp(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_UPDATED_AT,
+                       snapshot.range_updated_at);
+      const bool trend_time_read=
+         ReadTimestamp(FENX_DATABUS_KEY_ENVIRONMENT_TREND_UPDATED_AT,
+                       snapshot.trend_updated_at);
+      ReadTimestamp(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_CLOSED_BAR_TIME,
+                    snapshot.source_bar_time);
+
+      snapshot.volatility_valid=(snapshot.is_data_valid &&
+                                  volatility_level_read && atr>0.0 &&
+                                  volatility_score>=0.0 &&
+                                  volatility_score<=100.0);
+      snapshot.range_valid=(range_valid_read && range_source_valid);
+      snapshot.trend_valid=(trend_valid_read && trend_source_valid &&
+                            trend_direction_read && trend_confidence_read &&
+                            is_trend_read);
+      //--- No legacy Volatility timestamp exists; do not infer one.
+      snapshot.volatility_updated_at=0;
+      snapshot.source_updated_at=
+         (range_time_read && trend_time_read ?
+          (snapshot.range_updated_at<=snapshot.trend_updated_at ?
+           snapshot.range_updated_at : snapshot.trend_updated_at) : 0);
+
+      CMarketStateSnapshotContract contract;
+      contract.Finalize(snapshot,TimeCurrent(),m_freshness_limit_seconds);
+
+      //--- Match the existing public precision without changing DataBus.
+      snapshot.confidence=StringToDouble(DoubleToString(snapshot.confidence,2));
+     }
+
+   bool SameTypedSnapshot(const SMarketStateSnapshot &left,
+                          const SMarketStateSnapshot &right)
+     {
+      return(left.market_state==right.market_state &&
+             left.confidence==right.confidence &&
+             left.recommended_trading_style==right.recommended_trading_style &&
+             left.recommended_risk_level==right.recommended_risk_level &&
+             left.updated_at==right.updated_at &&
+             left.is_data_valid==right.is_data_valid &&
+             left.symbol==right.symbol && left.timeframe==right.timeframe &&
+             left.snapshot_version==right.snapshot_version &&
+             left.is_valid==right.is_valid && left.is_fresh==right.is_fresh &&
+             left.invalid_reason==right.invalid_reason &&
+             left.volatility_valid==right.volatility_valid &&
+             left.range_valid==right.range_valid &&
+             left.trend_valid==right.trend_valid &&
+             left.volatility_score==right.volatility_score &&
+             left.volatility_level==right.volatility_level &&
+             left.range_score==right.range_score &&
+             left.is_range==right.is_range &&
+             left.trend_direction==right.trend_direction &&
+             left.trend_strength==right.trend_strength &&
+             left.trend_score==right.trend_score &&
+             left.trend_confidence==right.trend_confidence &&
+             left.is_trend==right.is_trend &&
+             left.source_updated_at==right.source_updated_at &&
+             left.volatility_updated_at==right.volatility_updated_at &&
+             left.range_updated_at==right.range_updated_at &&
+             left.trend_updated_at==right.trend_updated_at &&
+             left.source_bar_time==right.source_bar_time);
+     }
+
+   bool StoreTypedSnapshot(const SMarketStateSnapshot &snapshot)
+     {
+      if(m_snapshot_store==NULL ||
+         !m_snapshot_store.SetMarketStateSnapshot(_Symbol,_Period,snapshot))
+         return(false);
+      if(m_consistency_verified)
+         return(true);
+
+      SMarketStateSnapshot stored;
+      if(!m_snapshot_store.GetMarketStateSnapshot(_Symbol,_Period,stored) ||
+         !SameTypedSnapshot(snapshot,stored))
+         return(false);
+
+      string state="",confidence="",style="",risk="",updated="";
+      if(m_data_bus==NULL ||
+         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_MARKET_STATE,state) ||
+         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_MARKET_CONFIDENCE,confidence) ||
+         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_RECOMMENDED_STYLE,style) ||
+         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_RECOMMENDED_RISK,risk) ||
+         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_MARKET_UPDATED_AT,updated))
+         return(false);
+
+      return(state==snapshot.market_state &&
+             confidence==DoubleToString(snapshot.confidence,2) &&
+             style==snapshot.recommended_trading_style &&
+             risk==snapshot.recommended_risk_level &&
+             updated==TimeToString(snapshot.updated_at,TIME_DATE|TIME_SECONDS));
+     }
+
 public:
                      CMarketStateIntegrator(void)
      {
@@ -182,10 +348,28 @@ public:
       m_trend_score_threshold=0.0;
       m_volatility_score_threshold=0.0;
       m_trend_min_adx=0.0;
+      m_freshness_limit_seconds=0;
+      m_consistency_verified=false;
+      m_snapshot_store=NULL;
+     }
+
+   //--- Injects the non-owning typed store before framework initialization.
+   //--- All trading consumers continue to use legacy Environment.Market keys.
+   bool              SetSnapshotStore(CCommonSnapshotStore &snapshot_store)
+     {
+      if(m_initialized)
+         return(false);
+      m_snapshot_store=GetPointer(snapshot_store);
+      return(m_snapshot_store!=NULL);
      }
 
    virtual bool       Initialize(CDataBus &data_bus,CParameterManager &parameters)
      {
+      if(m_snapshot_store==NULL)
+        {
+         CLogger::Error("MarketStateIntegrator requires CommonSnapshotStore before initialization.");
+         return(false);
+        }
       if(!CBaseEngine::Initialize(data_bus,parameters))
          return(false);
 
@@ -194,12 +378,14 @@ public:
       m_trend_score_threshold=parameters.MarketTrendScoreThreshold();
       m_volatility_score_threshold=parameters.MarketVolatilityScoreThreshold();
       m_trend_min_adx=parameters.MarketTrendMinAdx();
+      m_freshness_limit_seconds=parameters.RiskStaleDataLimitSeconds();
 
       if(m_range_score_threshold<0.0 || m_range_score_threshold>100.0 ||
          m_range_max_trend_score<0.0 || m_range_max_trend_score>100.0 ||
-         m_trend_score_threshold<0.0 || m_trend_score_threshold>100.0 ||
-         m_volatility_score_threshold<0.0 || m_volatility_score_threshold>100.0 ||
-         m_trend_min_adx<0.0 || m_trend_min_adx>100.0)
+          m_trend_score_threshold<0.0 || m_trend_score_threshold>100.0 ||
+          m_volatility_score_threshold<0.0 || m_volatility_score_threshold>100.0 ||
+          m_trend_min_adx<0.0 || m_trend_min_adx>100.0 ||
+          m_freshness_limit_seconds<=0)
         {
          CLogger::Error("MarketStateIntegrator received invalid configuration.");
          CBaseEngine::Shutdown();
@@ -233,12 +419,32 @@ public:
         }
 
       if(!PublishSnapshot(snapshot))
+        {
          CLogger::Error("MarketStateIntegrator could not publish its snapshot to DataBus.");
+         return;
+        }
+
+      BuildTypedSnapshot(snapshot,range_score,is_range,trend_score,
+                         trend_strength,volatility_score,atr);
+      if(!StoreTypedSnapshot(snapshot))
+        {
+         CLogger::Error("MarketStateIntegrator could not store or verify its typed snapshot.");
+         return;
+        }
+      if(!m_consistency_verified)
+        {
+         CLogger::Info(StringFormat(
+            "[COMMON_MARKET_STATE] typed_databus_consistency=PASS;symbol=%s;timeframe=%s;store_count=%d;keys=0;volatility_timestamp_available=false;priority=RANGING,TRENDING,VOLATILE,TRANSITION",
+            snapshot.symbol,snapshot.timeframe,
+            m_snapshot_store.MarketStateSnapshotCount()));
+         m_consistency_verified=true;
+        }
      }
 
    virtual void       Shutdown(void)
      {
       // MarketStateIntegrator owns no indicator or account resources.
+      m_consistency_verified=false;
       CBaseEngine::Shutdown();
      }
   };

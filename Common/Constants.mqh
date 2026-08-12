@@ -64,6 +64,10 @@
 #define FENX_DATABUS_KEY_ENVIRONMENT_RECOMMENDED_RISK     "Environment.Market.RecommendedRiskLevel"
 #define FENX_DATABUS_KEY_ENVIRONMENT_MARKET_UPDATED_AT    "Environment.Market.UpdatedAt"
 
+//--- Typed-only Common Market State snapshot contract. Existing
+//--- Environment.Market.* keys remain the authoritative trading interface.
+#define FENX_COMMON_MARKET_STATE_SNAPSHOT_VERSION         "1.0"
+
 //--- Shadow-only Common Environment snapshot contract
 #define FENX_COMMON_ENVIRONMENT_SNAPSHOT_VERSION                  "1.0"
 #define FENX_COMMON_ENVIRONMENT_KEY_COUNT                         32
