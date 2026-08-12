@@ -253,6 +253,10 @@
 #define FENX_DATABUS_KEY_STANDBY_SYSTEM_VALID                      "Standby.StandbySystemValid"
 #define FENX_DATABUS_KEY_STANDBY_SYSTEM_UPDATED_AT                 "Standby.StandbySystemUpdatedAt"
 
+//--- Typed-only Common Standby snapshot contract. The existing global and
+//--- Standby.<symbol>.* DataBus interfaces remain authoritative for trading.
+#define FENX_COMMON_STANDBY_SNAPSHOT_VERSION                       "1.0"
+
 //--- Per-symbol Risk Engine DataBus namespace and field names
 #define FENX_DATABUS_NAMESPACE_RISK                                "Risk"
 #define FENX_DATABUS_FIELD_SYMBOL_RISK_STATE                       "SymbolRiskState"

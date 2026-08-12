@@ -6,6 +6,7 @@
 
 #include "../Common/Constants.mqh"
 #include "../Common/Logger.mqh"
+#include "../Common/CommonSnapshotStore.mqh"
 #include "../Engine/BaseEngine.mqh"
 
 //--- Factual Environment data supplied by the earlier Environment Engine.
@@ -78,25 +79,9 @@ struct SStandbyRuntime
    int      recovery_confirmation_count;
    bool     duration_warning_logged;
    bool     critical_warning_logged;
-  };
-
-//--- Per-symbol non-executable standby recommendation.
-struct SStandbySnapshot
-  {
-   string   symbol;
-   string   state;
-   bool     is_active;
-   bool     are_new_entries_allowed;
-   bool     preserve_existing_positions;
-   string   reason;
-   double   confidence;
-   datetime entered_at;
-   long     duration_seconds;
-   double   recovery_progress;
-   double   escalation_score;
-   string   recommended_next_state;
-   bool     is_data_valid;
-   datetime updated_at;
+   bool     last_recovery_condition_met;
+   datetime last_recovery_check_at;
+   string   last_transition_reason;
   };
 
 //--- Global Standby Engine snapshot.
@@ -129,6 +114,8 @@ private:
    int             m_transition_cooldown_seconds;
    int             m_stale_data_grace_seconds;
    int             m_base_stale_data_limit_seconds;
+   bool            m_consistency_verified;
+   CCommonSnapshotStore *m_snapshot_store;
 
    double ClampPercent(const double value)
      {
@@ -145,6 +132,9 @@ private:
       runtime.recovery_confirmation_count=0;
       runtime.duration_warning_logged=false;
       runtime.critical_warning_logged=false;
+      runtime.last_recovery_condition_met=false;
+      runtime.last_recovery_check_at=0;
+      runtime.last_transition_reason="";
      }
 
    void ResetSnapshot(SStandbySnapshot &snapshot,const string symbol)
@@ -163,6 +153,35 @@ private:
       snapshot.recommended_next_state="NORMAL";
       snapshot.is_data_valid=false;
       snapshot.updated_at=TimeCurrent();
+      snapshot.timeframe=EnumToString(_Period);
+      snapshot.snapshot_version=FENX_COMMON_STANDBY_SNAPSHOT_VERSION;
+      snapshot.is_valid=false;
+      snapshot.is_fresh=false;
+      snapshot.invalid_reason="";
+      snapshot.is_standby=false;
+      snapshot.is_recovering=false;
+      snapshot.escalation_requested=false;
+      snapshot.risk_stop_requested=false;
+      snapshot.recovery_condition_met=false;
+      snapshot.recovery_confirmation_count=0;
+      snapshot.required_confirmation_count=m_recovery_confirmation_bars;
+      snapshot.recovery_started_at=0;
+      snapshot.last_recovery_check_at=0;
+      snapshot.standby_started_at=0;
+      snapshot.standby_duration_seconds=0;
+      snapshot.cooldown_until=0;
+      snapshot.last_state_changed_at=0;
+      snapshot.standby_reason="";
+      snapshot.recovery_reason="";
+      snapshot.escalation_reason="";
+      snapshot.market_state="TRANSITION";
+      snapshot.market_state_updated_at=0;
+      snapshot.market_selection_valid_available=false;
+      snapshot.market_selection_valid=false;
+      snapshot.is_market_eligible=false;
+      snapshot.strategy_selection_valid=false;
+      snapshot.source_updated_at=0;
+      snapshot.state_manager_state="INIT";
      }
 
    void ResetGlobalSnapshot(SGlobalStandbySnapshot &snapshot)
@@ -544,6 +563,26 @@ private:
              IsTimestampFresh(source.strategy_selection_updated_at,limit_seconds));
      }
 
+   //--- Returns the oldest required publisher timestamp. This mirrors the
+   //--- existing all-source freshness rule without adding a new data source.
+   datetime OldestTimestamp(const datetime &values[])
+     {
+      const int count=ArraySize(values);
+      if(count<=0)
+         return(0);
+      datetime oldest=values[0];
+      if(oldest<=0)
+         return(0);
+      for(int index=1;index<count;index++)
+        {
+         if(values[index]<=0)
+            return(0);
+         if(values[index]<oldest)
+            oldest=values[index];
+        }
+      return(oldest);
+     }
+
    bool LoadSymbols(CParameterManager &parameters)
      {
       const int symbol_count=parameters.MarketSelectionSymbolCount();
@@ -654,6 +693,7 @@ private:
       runtime.state_changed_at=now;
       runtime.entry_confirmation_count=0;
       runtime.recovery_confirmation_count=0;
+      runtime.last_transition_reason=reason;
 
       if(state=="NORMAL")
         {
@@ -720,6 +760,10 @@ private:
                                      environment.volatility_score<
                                         m_volatility_escalation_threshold &&
                                      !recommendation_blocked);
+      //--- Retain the already-calculated observation for the typed adapter.
+      //--- These fields never participate in a later state transition.
+      runtime.last_recovery_condition_met=recovery_condition;
+      runtime.last_recovery_check_at=TimeCurrent();
 
       if(runtime.state=="NORMAL")
         {
@@ -830,7 +874,8 @@ private:
      }
 
    void BuildSnapshot(const SStandbyRuntime &runtime,const SStandbyEnvironment &environment,
-                      const SStandbyInput &source,const bool is_participant,const bool data_valid,
+                      const SStandbyPipeline &pipeline,const SStandbyInput &source,
+                      const bool is_participant,const bool data_valid,
                       const bool data_fresh,SStandbySnapshot &snapshot)
      {
       snapshot.state=runtime.state;
@@ -872,6 +917,211 @@ private:
          snapshot.reason="Required DataBus facts are invalid, unavailable, or stale.";
       else
          snapshot.reason="Normal participation conditions are currently available.";
+
+      //--- Typed-only adapter fields observe the existing output and runtime.
+      snapshot.is_standby=snapshot.is_active;
+      snapshot.is_recovering=(runtime.state=="RECOVERY_PENDING");
+      snapshot.escalation_requested=(runtime.state=="ESCALATION_PENDING");
+      snapshot.risk_stop_requested=(runtime.state=="RISK_STOP_PENDING");
+      snapshot.recovery_condition_met=runtime.last_recovery_condition_met;
+      snapshot.recovery_confirmation_count=runtime.recovery_confirmation_count;
+      snapshot.required_confirmation_count=m_recovery_confirmation_bars;
+      snapshot.recovery_started_at=(snapshot.is_recovering ?
+                                    runtime.state_changed_at : 0);
+      snapshot.last_recovery_check_at=runtime.last_recovery_check_at;
+      snapshot.standby_started_at=snapshot.entered_at;
+      snapshot.standby_duration_seconds=snapshot.duration_seconds;
+      snapshot.cooldown_until=(runtime.state_changed_at>0 ?
+                               runtime.state_changed_at+
+                               m_transition_cooldown_seconds : 0);
+      snapshot.last_state_changed_at=runtime.state_changed_at;
+      snapshot.standby_reason=snapshot.reason;
+      snapshot.recovery_reason=(snapshot.is_recovering ?
+                                runtime.last_transition_reason : "");
+      snapshot.escalation_reason=(snapshot.escalation_requested ||
+                                  snapshot.risk_stop_requested ?
+                                  runtime.last_transition_reason : "");
+      snapshot.market_state=environment.market_state;
+      snapshot.market_state_updated_at=environment.market_updated_at;
+      // MarketSelection has eligibility and timestamp fields, but no explicit
+      // validity publisher; never infer a validity value from eligibility.
+      snapshot.market_selection_valid_available=false;
+      snapshot.market_selection_valid=false;
+      snapshot.is_market_eligible=source.is_market_eligible;
+      snapshot.strategy_selection_valid=source.is_strategy_selection_valid;
+      const datetime source_times[12]=
+        {
+         environment.market_updated_at,environment.range_updated_at,
+         environment.trend_updated_at,pipeline.pair_ranking_updated_at,
+         pipeline.allocation_updated_at,pipeline.style_updated_at,
+         pipeline.strategy_updated_at,source.market_selection_updated_at,
+         source.pair_ranking_updated_at,source.capital_allocation_updated_at,
+         source.trading_style_updated_at,source.strategy_selection_updated_at
+        };
+      snapshot.source_updated_at=OldestTimestamp(source_times);
+     }
+
+   bool SameTypedSnapshot(const SStandbySnapshot &left,
+                          const SStandbySnapshot &right)
+     {
+      return(left.symbol==right.symbol && left.state==right.state &&
+             left.is_active==right.is_active &&
+             left.are_new_entries_allowed==right.are_new_entries_allowed &&
+             left.preserve_existing_positions==right.preserve_existing_positions &&
+             left.reason==right.reason && left.confidence==right.confidence &&
+             left.entered_at==right.entered_at &&
+             left.duration_seconds==right.duration_seconds &&
+             left.recovery_progress==right.recovery_progress &&
+             left.escalation_score==right.escalation_score &&
+             left.recommended_next_state==right.recommended_next_state &&
+             left.is_data_valid==right.is_data_valid &&
+             left.updated_at==right.updated_at && left.timeframe==right.timeframe &&
+             left.snapshot_version==right.snapshot_version &&
+             left.is_valid==right.is_valid && left.is_fresh==right.is_fresh &&
+             left.invalid_reason==right.invalid_reason &&
+             left.is_standby==right.is_standby &&
+             left.is_recovering==right.is_recovering &&
+             left.escalation_requested==right.escalation_requested &&
+             left.risk_stop_requested==right.risk_stop_requested &&
+             left.recovery_condition_met==right.recovery_condition_met &&
+             left.recovery_confirmation_count==right.recovery_confirmation_count &&
+             left.required_confirmation_count==right.required_confirmation_count &&
+             left.recovery_started_at==right.recovery_started_at &&
+             left.last_recovery_check_at==right.last_recovery_check_at &&
+             left.standby_started_at==right.standby_started_at &&
+             left.standby_duration_seconds==right.standby_duration_seconds &&
+             left.cooldown_until==right.cooldown_until &&
+             left.last_state_changed_at==right.last_state_changed_at &&
+             left.standby_reason==right.standby_reason &&
+             left.recovery_reason==right.recovery_reason &&
+             left.escalation_reason==right.escalation_reason &&
+             left.market_state==right.market_state &&
+             left.market_state_updated_at==right.market_state_updated_at &&
+             left.market_selection_valid_available==
+                right.market_selection_valid_available &&
+             left.market_selection_valid==right.market_selection_valid &&
+             left.is_market_eligible==right.is_market_eligible &&
+             left.strategy_selection_valid==right.strategy_selection_valid &&
+             left.source_updated_at==right.source_updated_at &&
+             left.state_manager_state==right.state_manager_state);
+     }
+
+   bool VerifyDataBusSnapshot(const SStandbySnapshot &snapshot)
+     {
+      if(m_data_bus==NULL)
+         return(false);
+      string state="",active="",entry_allowed="",preserve="",reason="";
+      string confidence="",entered="",duration="",recovery="",escalation="";
+      string next_state="",data_valid="",updated="";
+      return(m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_STANDBY,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_STANDBY_STATE,state) &&
+             m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_STANDBY,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_STANDBY_IS_ACTIVE,active) &&
+             m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_STANDBY,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_STANDBY_NEW_ENTRIES_ALLOWED,
+                                         entry_allowed) &&
+             m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_STANDBY,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_STANDBY_PRESERVE_POSITIONS,
+                                         preserve) &&
+             m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_STANDBY,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_STANDBY_REASON,reason) &&
+             m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_STANDBY,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_STANDBY_CONFIDENCE,
+                                         confidence) &&
+             m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_STANDBY,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_STANDBY_ENTERED_AT,entered) &&
+             m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_STANDBY,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_STANDBY_DURATION_SECONDS,
+                                         duration) &&
+             m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_STANDBY,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_STANDBY_RECOVERY_PROGRESS,
+                                         recovery) &&
+             m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_STANDBY,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_STANDBY_ESCALATION_SCORE,
+                                         escalation) &&
+             m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_STANDBY,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_STANDBY_RECOMMENDED_NEXT_STATE,
+                                         next_state) &&
+             m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_STANDBY,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_STANDBY_DATA_VALID,
+                                         data_valid) &&
+             m_data_bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_STANDBY,
+                                         snapshot.symbol,
+                                         FENX_DATABUS_FIELD_STANDBY_UPDATED_AT,updated) &&
+             state==snapshot.state &&
+             active==(snapshot.is_active ? "true" : "false") &&
+             entry_allowed==(snapshot.are_new_entries_allowed ? "true" : "false") &&
+             preserve=="true" && reason==snapshot.reason &&
+             confidence==DoubleToString(snapshot.confidence,2) &&
+             entered==TimeToString(snapshot.entered_at,TIME_DATE|TIME_SECONDS) &&
+             duration==IntegerToString((int)snapshot.duration_seconds) &&
+             recovery==DoubleToString(snapshot.recovery_progress,2) &&
+             escalation==DoubleToString(snapshot.escalation_score,2) &&
+             next_state==snapshot.recommended_next_state &&
+             data_valid==(snapshot.is_data_valid ? "true" : "false") &&
+             updated==TimeToString(snapshot.updated_at,TIME_DATE|TIME_SECONDS));
+     }
+
+   void LogTypedTelemetry(const string event_name,const string state_before,
+                          const SStandbySnapshot &snapshot)
+     {
+      CLogger::Info(StringFormat(
+         "[COMMON_STANDBY] event=%s;Time=%s;Symbol=%s;StateBefore=%s;StateAfter=%s;EntryAllowed=%s;StandbyReason=%s;RecoveryCondition=%s;RecoveryConfirmationCount=%d;EscalationRequested=%s;RiskStopRequested=%s;StateManagerState=%s;SnapshotUpdatedAt=%s;store_count=%d;keys=0;market_selection_valid_available=false",
+         event_name,TimeToString(TimeCurrent(),TIME_DATE|TIME_SECONDS),
+         snapshot.symbol,state_before,snapshot.state,
+         (snapshot.are_new_entries_allowed ? "true" : "false"),snapshot.reason,
+         (snapshot.recovery_condition_met ? "true" : "false"),
+         snapshot.recovery_confirmation_count,
+         (snapshot.escalation_requested ? "true" : "false"),
+         (snapshot.risk_stop_requested ? "true" : "false"),
+         snapshot.state_manager_state,
+         TimeToString(snapshot.updated_at,TIME_DATE|TIME_SECONDS),
+         m_snapshot_store.StandbySnapshotCount()));
+     }
+
+   bool StoreTypedSnapshot(SStandbySnapshot &snapshot)
+     {
+      if(m_snapshot_store==NULL)
+         return(false);
+
+      snapshot.state_manager_state=(m_state_manager==NULL ? "INIT" :
+         m_state_manager.StateName(m_state_manager.GetState()));
+      CStandbySnapshotContract contract;
+      contract.Finalize(snapshot,TimeCurrent(),m_base_stale_data_limit_seconds);
+
+      SStandbySnapshot previous;
+      const bool had_previous=m_snapshot_store.GetStandbySnapshot(
+         snapshot.symbol,_Period,previous);
+      if(!m_snapshot_store.SetStandbySnapshot(snapshot.symbol,_Period,snapshot))
+         return(false);
+
+      SStandbySnapshot stored;
+      if(!m_snapshot_store.GetStandbySnapshot(snapshot.symbol,_Period,stored) ||
+         !SameTypedSnapshot(snapshot,stored))
+         return(false);
+
+      if(!m_consistency_verified)
+        {
+         if(!VerifyDataBusSnapshot(snapshot))
+            return(false);
+         LogTypedTelemetry("CONSISTENCY_PASS","UNAVAILABLE",snapshot);
+         m_consistency_verified=true;
+        }
+      else if(had_previous && previous.state!=snapshot.state)
+         LogTypedTelemetry("STATE_CHANGE",previous.state,snapshot);
+      return(true);
      }
 
    bool PublishSnapshot(const SStandbySnapshot &snapshot)
@@ -986,10 +1236,27 @@ public:
       m_transition_cooldown_seconds=0;
       m_stale_data_grace_seconds=0;
       m_base_stale_data_limit_seconds=0;
+      m_consistency_verified=false;
+      m_snapshot_store=NULL;
+     }
+
+   //--- Injects the non-owning typed store before framework initialization.
+   //--- Existing Standby DataBus outputs remain the trading interface.
+   bool              SetSnapshotStore(CCommonSnapshotStore &snapshot_store)
+     {
+      if(m_initialized)
+         return(false);
+      m_snapshot_store=GetPointer(snapshot_store);
+      return(m_snapshot_store!=NULL);
      }
 
    virtual bool       Initialize(CDataBus &data_bus,CParameterManager &parameters)
      {
+      if(m_snapshot_store==NULL)
+        {
+         CLogger::Error("StandbyEngine requires CommonSnapshotStore before initialization.");
+         return(false);
+        }
       if(!CBaseEngine::Initialize(data_bus,parameters))
          return(false);
 
@@ -1106,7 +1373,7 @@ public:
          else
             ResetRuntime(m_runtime[index]);
 
-         BuildSnapshot(m_runtime[index],environment,source,is_participant,data_valid,
+         BuildSnapshot(m_runtime[index],environment,pipeline,source,is_participant,data_valid,
                        data_fresh,snapshots[index]);
          if(!snapshots[index].is_data_valid)
             all_data_valid=false;
@@ -1129,12 +1396,20 @@ public:
       if(!PublishGlobalSnapshot(global_snapshot))
          CLogger::Error("StandbyEngine could not publish global standby data.");
       RequestCoreState(global_snapshot);
+      for(int index=0;index<symbol_count;index++)
+        {
+         if(!StoreTypedSnapshot(snapshots[index]))
+            CLogger::Error(StringFormat(
+               "StandbyEngine could not store or verify the typed %s snapshot.",
+               m_symbols[index]));
+        }
      }
 
    virtual void       Shutdown(void)
      {
       ArrayFree(m_symbols);
       ArrayFree(m_runtime);
+      m_consistency_verified=false;
       CBaseEngine::Shutdown();
      }
   };

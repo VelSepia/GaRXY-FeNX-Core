@@ -141,6 +141,11 @@ int OnInit()
       CLogger::Error("Unable to attach CommonSnapshotStore to EnvironmentEngine.");
       return(INIT_FAILED);
      }
+   if(!g_standby_engine.SetSnapshotStore(g_common_snapshot_store))
+     {
+      CLogger::Error("Unable to attach CommonSnapshotStore to StandbyEngine.");
+      return(INIT_FAILED);
+     }
    if(!g_confidence_engine.SetSnapshotStore(g_common_snapshot_store))
      {
       CLogger::Error("Unable to attach CommonSnapshotStore to ConfidenceEngine.");

@@ -9,6 +9,7 @@
 #include "../Environment/RangeSnapshot.mqh"
 #include "../Environment/TrendSnapshot.mqh"
 #include "../Environment/MarketStateSnapshot.mqh"
+#include "../Standby/StandbySnapshot.mqh"
 #include "../Confidence/ConfidenceSnapshot.mqh"
 #include "../Decision/DecisionScoreSnapshot.mqh"
 
@@ -72,6 +73,18 @@ struct SCommonMarketStateSnapshotRecord
    SMarketStateSnapshot market_state;
   };
 
+//--- Metadata and typed payload for one Common Standby identity.
+struct SCommonStandbySnapshotRecord
+  {
+   string           symbol;
+   ENUM_TIMEFRAMES  timeframe;
+   string           snapshot_type;
+   string           snapshot_version;
+   datetime         updated_at;
+   bool             is_valid;
+   SStandbySnapshot standby;
+  };
+
 //--- Metadata and typed payload for one Common Confidence identity.
 struct SCommonConfidenceSnapshotRecord
   {
@@ -107,6 +120,7 @@ private:
    SCommonRangeSnapshotRecord       m_range_records[];
    SCommonTrendSnapshotRecord       m_trend_records[];
    SCommonMarketStateSnapshotRecord m_market_state_records[];
+   SCommonStandbySnapshotRecord     m_standby_records[];
    SCommonConfidenceSnapshotRecord  m_confidence_records[];
    SCommonDecisionScoreSnapshotRecord m_decision_score_records[];
 
@@ -189,6 +203,18 @@ private:
         {
          if(m_market_state_records[index].symbol==symbol &&
             m_market_state_records[index].timeframe==timeframe)
+            return(index);
+        }
+      return(-1);
+     }
+
+   int               FindStandbyIndex(const string symbol,
+                                      const ENUM_TIMEFRAMES timeframe)
+     {
+      for(int index=0;index<ArraySize(m_standby_records);index++)
+        {
+         if(m_standby_records[index].symbol==symbol &&
+            m_standby_records[index].timeframe==timeframe)
             return(index);
         }
       return(-1);
@@ -460,6 +486,59 @@ public:
       return(ArraySize(m_market_state_records));
      }
 
+   //--- Adds or replaces one already-decided Common Standby snapshot. The
+   //--- store never executes or duplicates Standby state-machine transitions.
+   bool              SetStandbySnapshot(const string symbol,
+                                        const ENUM_TIMEFRAMES timeframe,
+                                        const SStandbySnapshot &snapshot)
+     {
+      if(StringLen(symbol)==0 || PeriodSeconds(timeframe)<=0 ||
+         snapshot.symbol!=symbol ||
+         snapshot.timeframe!=EnumToString(timeframe) ||
+         StringLen(snapshot.snapshot_version)==0 || snapshot.updated_at<=0)
+         return(false);
+
+      int index=FindStandbyIndex(symbol,timeframe);
+      if(index<0)
+        {
+         const int count=ArraySize(m_standby_records);
+         if(ArrayResize(m_standby_records,count+1)!=(count+1))
+            return(false);
+         index=count;
+        }
+
+      m_standby_records[index].symbol=symbol;
+      m_standby_records[index].timeframe=timeframe;
+      m_standby_records[index].snapshot_type="Standby";
+      m_standby_records[index].snapshot_version=snapshot.snapshot_version;
+      m_standby_records[index].updated_at=snapshot.updated_at;
+      m_standby_records[index].is_valid=snapshot.is_valid;
+      m_standby_records[index].standby=snapshot;
+      return(true);
+     }
+
+   bool              GetStandbySnapshot(const string symbol,
+                                        const ENUM_TIMEFRAMES timeframe,
+                                        SStandbySnapshot &snapshot)
+     {
+      const int index=FindStandbyIndex(symbol,timeframe);
+      if(index<0)
+         return(false);
+      snapshot=m_standby_records[index].standby;
+      return(true);
+     }
+
+   bool              HasStandbySnapshot(const string symbol,
+                                        const ENUM_TIMEFRAMES timeframe)
+     {
+      return(FindStandbyIndex(symbol,timeframe)>=0);
+     }
+
+   int               StandbySnapshotCount(void)
+     {
+      return(ArraySize(m_standby_records));
+     }
+
    //--- Adds or replaces one typed Common Confidence snapshot for a stable
    //--- Symbol+Timeframe identity without altering Environment records.
    bool              SetConfidenceSnapshot(const string symbol,
@@ -573,6 +652,7 @@ public:
       ArrayFree(m_range_records);
       ArrayFree(m_trend_records);
       ArrayFree(m_market_state_records);
+      ArrayFree(m_standby_records);
       ArrayFree(m_confidence_records);
       ArrayFree(m_decision_score_records);
      }
