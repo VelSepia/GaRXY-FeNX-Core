@@ -6,7 +6,8 @@
 
 //--- Framework identifiers and conservative Phase3-1 limits
 #define FENX_EA_NAME           "GaRXY FeNX"
-#define FENX_MAX_ENGINES       32
+#define FENX_MAX_ENGINES       256
+#define FENX_MAX_RUNTIME_CONTEXTS 10
 #define FENX_DATABUS_CAPACITY  2048
 #define FENX_MARKET_SELECTION_MAX_SYMBOLS 5
 #define FENX_PAIR_RANKING_COMPARE_EPSILON 0.0001

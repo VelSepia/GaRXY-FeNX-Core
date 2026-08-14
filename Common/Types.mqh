@@ -32,6 +32,51 @@ struct SRuntimeContextId
    ENUM_TIMEFRAMES timeframe;
   };
 
+//--- Defines the bounded role a runtime context can have. Task026 permits
+//--- trading only through the single primary context; auxiliary contexts are
+//--- retained for future analysis-pipeline promotion and do not trade.
+enum ENUM_FENX_CONTEXT_ROLE
+  {
+   FENX_CONTEXT_ROLE_PRIMARY_TRADING = 0,
+   FENX_CONTEXT_ROLE_AUXILIARY_ANALYSIS
+  };
+
+//--- Formal immutable-at-runtime configuration for one Symbol+Timeframe
+//--- context. Runtime ownership belongs to CRuntimeContextRegistry; this value
+//--- object is safe for ParameterManager and harnesses to copy.
+struct SRuntimeContextConfig
+  {
+   SRuntimeContextId     id;
+   bool                  enabled;
+   bool                  required;
+   bool                  trade_enabled;
+   ENUM_FENX_CONTEXT_ROLE role;
+   long                  magic;
+   string                parameter_profile_id;
+  };
+
+//--- Establishes an explicitly invalid, disabled configuration. Callers must
+//--- fill every required field before attempting registry initialization.
+void ResetRuntimeContextConfig(SRuntimeContextConfig &config)
+  {
+   config.id.symbol="";
+   config.id.timeframe=PERIOD_CURRENT;
+   config.enabled=false;
+   config.required=false;
+   config.trade_enabled=false;
+   config.role=FENX_CONTEXT_ROLE_AUXILIARY_ANALYSIS;
+   config.magic=0;
+   config.parameter_profile_id="";
+  }
+
+//--- Role validation is intentionally independent from broker availability so
+//--- deterministic synthetic-context tests do not require Market Watch state.
+bool IsValidRuntimeContextRole(const ENUM_FENX_CONTEXT_ROLE role)
+  {
+   return(role==FENX_CONTEXT_ROLE_PRIMARY_TRADING ||
+          role==FENX_CONTEXT_ROLE_AUXILIARY_ANALYSIS);
+  }
+
 //--- Returns the explicit, human-readable timeframe token used in context keys.
 string RuntimeContextTimeframeName(const ENUM_TIMEFRAMES timeframe)
   {

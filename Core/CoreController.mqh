@@ -8,6 +8,7 @@
 #include "../Config/ParameterManager.mqh"
 #include "DataBus.mqh"
 #include "EngineManager.mqh"
+#include "RuntimeContextRegistry.mqh"
 #include "StateManager.mqh"
 
 //--- Top-level coordinator for framework initialization, updates, and shutdown.
@@ -17,6 +18,7 @@ private:
    CDataBus       m_data_bus;
    CEngineManager m_engine_manager;
    CStateManager  m_state_manager;
+   CRuntimeContextRegistry m_runtime_context_registry;
    bool           m_initialized;
 
 public:
@@ -33,12 +35,39 @@ public:
          return(true);
         }
 
+      // Runtime contexts are validated before any engine can initialize or
+      // trade. Existing engines remain on their legacy global-state path.
+      if(!m_runtime_context_registry.Initialize(parameters,true))
+        {
+         CLogger::Error("CoreController runtime context initialization failed.");
+         return(false);
+        }
+
+      const int configured_symbols=parameters.MarketSelectionSymbolCount();
+      const int estimated_databus_entries=
+         FENX_DATABUS_BASELINE_FIXED_ENTRIES+
+         FENX_DATABUS_BASELINE_PER_SYMBOL_ENTRIES*configured_symbols+
+         FENX_COMMON_ENVIRONMENT_KEY_COUNT+
+         FENX_COMMON_CONFIDENCE_GLOBAL_KEY_COUNT+
+         FENX_COMMON_DECISION_GLOBAL_KEY_COUNT+
+         (FENX_COMMON_CONFIDENCE_PER_SYMBOL_KEY_COUNT+
+          FENX_COMMON_DECISION_PER_SYMBOL_KEY_COUNT)*configured_symbols;
+      SRuntimeContextPreflight runtime_preflight;
+      if(!m_runtime_context_registry.ValidateCapacityPreflight(
+            estimated_databus_entries,m_engine_manager.Count(),runtime_preflight))
+        {
+         m_runtime_context_registry.Clear();
+         CLogger::Error("CoreController runtime context preflight failed.");
+         return(false);
+        }
+
       m_state_manager.Reset();
 
       // TODO(Phase3-3+): Register additional engines as their dedicated phases begin.
       if(!m_engine_manager.Initialize(m_data_bus,parameters,m_state_manager))
         {
          m_state_manager.TransitionTo(FENX_STATE_SHUTDOWN);
+         m_runtime_context_registry.Clear();
          CLogger::Error("CoreController failed to initialize EngineManager.");
          return(false);
         }
@@ -46,6 +75,7 @@ public:
       if(!m_state_manager.TransitionTo(FENX_STATE_NORMAL))
         {
          m_engine_manager.Shutdown();
+         m_runtime_context_registry.Clear();
          return(false);
         }
 
@@ -79,6 +109,7 @@ public:
          m_state_manager.TransitionTo(FENX_STATE_SHUTDOWN);
 
       m_engine_manager.Shutdown();
+      m_runtime_context_registry.Clear();
       m_data_bus.Clear();
       m_initialized=false;
       CLogger::Info("CoreController shut down.");
@@ -97,6 +128,11 @@ public:
    CStateManager    *State(void)
      {
       return(GetPointer(m_state_manager));
+     }
+
+   CRuntimeContextRegistry *RuntimeContexts(void)
+     {
+      return(GetPointer(m_runtime_context_registry));
      }
   };
 

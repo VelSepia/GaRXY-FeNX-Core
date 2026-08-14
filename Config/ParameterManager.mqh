@@ -6,6 +6,7 @@
 
 #include "../Common/Constants.mqh"
 #include "../Common/Logger.mqh"
+#include "../Common/Types.mqh"
 
 //--- Owns framework configuration independently from trading logic.
 class CParameterManager
@@ -137,6 +138,35 @@ private:
    int    m_execution_transient_retry_limit;
    string m_execution_trade_comment;
 
+   SRuntimeContextConfig m_runtime_contexts[];
+   bool                  m_has_explicit_runtime_contexts;
+
+   //--- Creates the compatibility context without marking it as an explicit
+   //--- user configuration. The chart period is captured as an explicit enum.
+   bool              BuildSingleRuntimeContextFallbackInternal(const string symbol,
+                                                                const ENUM_TIMEFRAMES timeframe,
+                                                                const long magic)
+     {
+      SRuntimeContextId context_id;
+      context_id.symbol=symbol;
+      context_id.timeframe=timeframe;
+      if(!IsValidRuntimeContextId(context_id) || magic<=0)
+         return(false);
+
+      if(ArrayResize(m_runtime_contexts,1)!=1)
+         return(false);
+
+      m_runtime_contexts[0].id=context_id;
+      m_runtime_contexts[0].enabled=true;
+      m_runtime_contexts[0].required=true;
+      m_runtime_contexts[0].trade_enabled=true;
+      m_runtime_contexts[0].role=FENX_CONTEXT_ROLE_PRIMARY_TRADING;
+      m_runtime_contexts[0].magic=magic;
+      m_runtime_contexts[0].parameter_profile_id="default";
+      m_has_explicit_runtime_contexts=false;
+      return(true);
+     }
+
 public:
                      CParameterManager(void)
      {
@@ -209,6 +239,196 @@ public:
       m_execution_maximum_slippage_points=maximum_slippage_points;
       m_execution_transient_retry_limit=transient_retry_limit;
       m_execution_trade_comment=trade_comment;
+
+      // Keep the generated single-context fallback aligned with the existing
+      // execution magic while leaving an explicit context list untouched.
+      if(!m_has_explicit_runtime_contexts &&
+         !BuildSingleRuntimeContextFallbackInternal(_Symbol,
+                                                    (ENUM_TIMEFRAMES)_Period,
+                                                    magic_number))
+        {
+         CLogger::Error("Unable to refresh the single runtime context fallback.");
+         return(false);
+        }
+      return(true);
+     }
+
+   //--- Replaces the formal context list. Cross-context invariants are checked
+   //--- by ValidateRuntimeContextConfiguration during startup preflight so the
+   //--- same validation path can be exercised with failing harness fixtures.
+   bool              SetRuntimeContextConfigs(SRuntimeContextConfig &configs[])
+     {
+      const int context_count=ArraySize(configs);
+      if(context_count<1 || context_count>FENX_MAX_RUNTIME_CONTEXTS)
+         return(false);
+
+      for(int index=0;index<context_count;index++)
+        {
+         if(!IsValidRuntimeContextId(configs[index].id) ||
+            !IsValidRuntimeContextRole(configs[index].role) ||
+            configs[index].magic<=0)
+            return(false);
+        }
+
+      if(ArrayResize(m_runtime_contexts,context_count)!=context_count)
+         return(false);
+
+      for(int index=0;index<context_count;index++)
+         m_runtime_contexts[index]=configs[index];
+
+      m_has_explicit_runtime_contexts=true;
+      return(true);
+     }
+
+   //--- Restores the exact legacy chart context when no explicit list exists.
+   bool              UseSingleRuntimeContextFallback(void)
+     {
+      return(BuildSingleRuntimeContextFallbackInternal(_Symbol,
+                                                       (ENUM_TIMEFRAMES)_Period,
+                                                       m_execution_magic_number));
+     }
+
+   int               RuntimeContextCount(void)
+     {
+      return(ArraySize(m_runtime_contexts));
+     }
+
+   bool              HasExplicitRuntimeContexts(void)
+     {
+      return(m_has_explicit_runtime_contexts);
+     }
+
+   bool              GetRuntimeContextConfig(const int index,
+                                             SRuntimeContextConfig &config)
+     {
+      if(index<0 || index>=ArraySize(m_runtime_contexts))
+         return(false);
+
+      config=m_runtime_contexts[index];
+      return(true);
+     }
+
+   int               FindRuntimeContext(const SRuntimeContextId &context_id)
+     {
+      if(!IsValidRuntimeContextId(context_id))
+         return(-1);
+
+      for(int index=0;index<ArraySize(m_runtime_contexts);index++)
+        {
+         if(RuntimeContextEquals(m_runtime_contexts[index].id,context_id))
+            return(index);
+        }
+      return(-1);
+     }
+
+   bool              HasRuntimeContext(const SRuntimeContextId &context_id)
+     {
+      return(FindRuntimeContext(context_id)>=0);
+     }
+
+   //--- Returns a primary only when exactly one enabled trading primary exists.
+   int               PrimaryRuntimeContextIndex(void)
+     {
+      int primary_index=-1;
+      for(int index=0;index<ArraySize(m_runtime_contexts);index++)
+        {
+         if(!m_runtime_contexts[index].enabled ||
+            !m_runtime_contexts[index].trade_enabled ||
+            m_runtime_contexts[index].role!=FENX_CONTEXT_ROLE_PRIMARY_TRADING)
+            continue;
+
+         if(primary_index>=0)
+            return(-1);
+         primary_index=index;
+        }
+      return(primary_index);
+     }
+
+   bool              GetPrimaryRuntimeContext(SRuntimeContextConfig &config)
+     {
+      const int primary_index=PrimaryRuntimeContextIndex();
+      return(primary_index>=0 && GetRuntimeContextConfig(primary_index,config));
+     }
+
+   //--- Validates identity and policy invariants without touching broker state.
+   //--- Symbol existence/selection is deliberately a separate registry step.
+   bool              ValidateRuntimeContextConfiguration(string &reason)
+     {
+      reason="";
+      const int context_count=ArraySize(m_runtime_contexts);
+      if(context_count<1 || context_count>FENX_MAX_RUNTIME_CONTEXTS)
+        {
+         reason="CONTEXT_COUNT";
+         return(false);
+        }
+
+      int primary_count=0;
+      int enabled_count=0;
+      for(int left=0;left<context_count;left++)
+        {
+         const SRuntimeContextConfig config=m_runtime_contexts[left];
+         if(!IsValidRuntimeContextId(config.id))
+           {
+            reason="INVALID_IDENTITY";
+            return(false);
+           }
+         if(!IsValidRuntimeContextRole(config.role) || config.magic<=0)
+           {
+            reason="INVALID_CONTEXT_CONFIG";
+            return(false);
+           }
+         if((config.required || config.trade_enabled) && !config.enabled)
+           {
+            reason="DISABLED_CONTEXT_FLAGS";
+            return(false);
+           }
+         if(config.role==FENX_CONTEXT_ROLE_AUXILIARY_ANALYSIS && config.trade_enabled)
+           {
+            reason="AUXILIARY_TRADING";
+            return(false);
+           }
+
+         if(config.enabled)
+           {
+            enabled_count++;
+            if(config.role==FENX_CONTEXT_ROLE_PRIMARY_TRADING)
+              {
+               if(!config.trade_enabled)
+                 {
+                  reason="PRIMARY_TRADING_DISABLED";
+                  return(false);
+                 }
+               primary_count++;
+              }
+           }
+
+         for(int right=left+1;right<context_count;right++)
+           {
+            if(RuntimeContextEquals(config.id,m_runtime_contexts[right].id))
+              {
+               reason="DUPLICATE_IDENTITY";
+               return(false);
+              }
+            if(config.enabled && m_runtime_contexts[right].enabled &&
+               config.id.symbol==m_runtime_contexts[right].id.symbol &&
+               config.magic==m_runtime_contexts[right].magic)
+              {
+               reason="MAGIC_OWNERSHIP_COLLISION";
+               return(false);
+              }
+           }
+        }
+
+      if(enabled_count<1)
+        {
+         reason="NO_ENABLED_CONTEXT";
+         return(false);
+        }
+      if(primary_count!=1)
+        {
+         reason="PRIMARY_COUNT";
+         return(false);
+        }
       return(true);
      }
 
@@ -339,6 +559,11 @@ public:
       m_execution_maximum_slippage_points=10;
       m_execution_transient_retry_limit=1;
       m_execution_trade_comment="GaRXY_FeNX_Core_v1";
+      m_has_explicit_runtime_contexts=false;
+      if(!BuildSingleRuntimeContextFallbackInternal(_Symbol,
+                                                    (ENUM_TIMEFRAMES)_Period,
+                                                    m_execution_magic_number))
+         ArrayResize(m_runtime_contexts,0);
      }
 
    int               UpdateIntervalSeconds(void)
