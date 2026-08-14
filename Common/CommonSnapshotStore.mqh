@@ -13,6 +13,7 @@
 #include "../Risk/RiskSnapshot.mqh"
 #include "../Entry/EntrySnapshot.mqh"
 #include "../Exit/ExitSnapshot.mqh"
+#include "../Execution/ExecutionSnapshot.mqh"
 #include "../Confidence/ConfidenceSnapshot.mqh"
 #include "../Decision/DecisionScoreSnapshot.mqh"
 
@@ -124,6 +125,18 @@ struct SCommonExitSnapshotRecord
    SExitSnapshot   exit_snapshot;
   };
 
+//--- Current typed Common Execution result for one Symbol+Timeframe identity.
+struct SCommonExecutionSnapshotRecord
+  {
+   string                   symbol;
+   ENUM_TIMEFRAMES          timeframe;
+   string                   snapshot_type;
+   string                   snapshot_version;
+   datetime                 updated_at;
+   bool                     is_valid;
+   SCommonExecutionSnapshot execution;
+  };
+
 //--- Metadata and typed payload for one Common Confidence identity.
 struct SCommonConfidenceSnapshotRecord
   {
@@ -165,6 +178,8 @@ private:
    SEntrySnapshot                   m_entry_history[];
    SCommonExitSnapshotRecord        m_exit_records[];
    SExitSnapshot                    m_exit_history[];
+   SCommonExecutionSnapshotRecord   m_execution_records[];
+   SCommonExecutionSnapshot         m_execution_history[];
    SCommonConfidenceSnapshotRecord  m_confidence_records[];
    SCommonDecisionScoreSnapshotRecord m_decision_score_records[];
 
@@ -300,6 +315,18 @@ private:
       return(-1);
      }
 
+   int               FindExecutionIndex(const string symbol,
+                                         const ENUM_TIMEFRAMES timeframe)
+     {
+      for(int index=0;index<ArraySize(m_execution_records);index++)
+        {
+         if(m_execution_records[index].symbol==symbol &&
+            m_execution_records[index].timeframe==timeframe)
+            return(index);
+        }
+      return(-1);
+     }
+
    //--- Keeps a bounded chronological audit. Re-publishing the same evaluation
    //--- sequence updates its existing record rather than duplicating it.
    bool              StoreEntryHistory(const SEntrySnapshot &snapshot)
@@ -359,6 +386,37 @@ private:
       for(int index=1;index<count;index++)
          m_exit_history[index-1]=m_exit_history[index];
       m_exit_history[count-1]=snapshot;
+      return(true);
+     }
+
+   //--- Retains the latest bounded request/result records. The Sequence is
+   //--- unique per authorized Entry or Close request.
+   bool              StoreExecutionHistory(const SCommonExecutionSnapshot &snapshot)
+     {
+      const int count=ArraySize(m_execution_history);
+      for(int index=count-1;index>=0;index--)
+        {
+         if(m_execution_history[index].symbol==snapshot.symbol &&
+            m_execution_history[index].timeframe==snapshot.timeframe &&
+            m_execution_history[index].execution_sequence==
+               snapshot.execution_sequence)
+           {
+            m_execution_history[index]=snapshot;
+            return(true);
+           }
+        }
+
+      if(count<FENX_COMMON_EXECUTION_HISTORY_LIMIT)
+        {
+         if(ArrayResize(m_execution_history,count+1)!=(count+1))
+            return(false);
+         m_execution_history[count]=snapshot;
+         return(true);
+        }
+
+      for(int index=1;index<count;index++)
+         m_execution_history[index-1]=m_execution_history[index];
+      m_execution_history[count-1]=snapshot;
       return(true);
      }
 
@@ -872,6 +930,74 @@ public:
       return(true);
      }
 
+   //--- Stores one finalized request/result from the existing ExecutionEngine
+   //--- without publishing new DataBus keys or changing legacy consumers.
+   bool              SetExecutionSnapshot(const string symbol,
+                                           const ENUM_TIMEFRAMES timeframe,
+                                           const SCommonExecutionSnapshot &snapshot)
+     {
+      if(StringLen(symbol)==0 || PeriodSeconds(timeframe)<=0 ||
+         snapshot.symbol!=symbol ||
+         snapshot.timeframe!=EnumToString(timeframe) ||
+         StringLen(snapshot.snapshot_version)==0 || snapshot.updated_at<=0 ||
+         snapshot.execution_sequence<=0)
+         return(false);
+
+      int index=FindExecutionIndex(symbol,timeframe);
+      if(index<0)
+        {
+         const int count=ArraySize(m_execution_records);
+         if(ArrayResize(m_execution_records,count+1)!=(count+1))
+            return(false);
+         index=count;
+        }
+
+      m_execution_records[index].symbol=symbol;
+      m_execution_records[index].timeframe=timeframe;
+      m_execution_records[index].snapshot_type="Execution";
+      m_execution_records[index].snapshot_version=snapshot.snapshot_version;
+      m_execution_records[index].updated_at=snapshot.updated_at;
+      m_execution_records[index].is_valid=snapshot.is_valid;
+      m_execution_records[index].execution=snapshot;
+      return(StoreExecutionHistory(snapshot));
+     }
+
+   bool              GetExecutionSnapshot(const string symbol,
+                                           const ENUM_TIMEFRAMES timeframe,
+                                           SCommonExecutionSnapshot &snapshot)
+     {
+      const int index=FindExecutionIndex(symbol,timeframe);
+      if(index<0)
+         return(false);
+      snapshot=m_execution_records[index].execution;
+      return(true);
+     }
+
+   bool              HasExecutionSnapshot(const string symbol,
+                                           const ENUM_TIMEFRAMES timeframe)
+     {
+      return(FindExecutionIndex(symbol,timeframe)>=0);
+     }
+
+   int               ExecutionSnapshotCount(void)
+     {
+      return(ArraySize(m_execution_records));
+     }
+
+   int               ExecutionHistoryCount(void)
+     {
+      return(ArraySize(m_execution_history));
+     }
+
+   bool              GetExecutionHistorySnapshot(const int index,
+                                                  SCommonExecutionSnapshot &snapshot)
+     {
+      if(index<0 || index>=ArraySize(m_execution_history))
+         return(false);
+      snapshot=m_execution_history[index];
+      return(true);
+     }
+
    //--- Adds or replaces one typed Common Confidence snapshot for a stable
    //--- Symbol+Timeframe identity without altering Environment records.
    bool              SetConfidenceSnapshot(const string symbol,
@@ -991,6 +1117,8 @@ public:
       ArrayFree(m_entry_history);
       ArrayFree(m_exit_records);
       ArrayFree(m_exit_history);
+      ArrayFree(m_execution_records);
+      ArrayFree(m_execution_history);
       ArrayFree(m_confidence_records);
       ArrayFree(m_decision_score_records);
      }

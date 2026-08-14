@@ -163,7 +163,7 @@ int OnInit()
      }
    if(!g_execution_engine.SetSnapshotStore(g_common_snapshot_store))
      {
-      CLogger::Error("Unable to attach CommonSnapshotStore to Common Entry and Exit adapters.");
+      CLogger::Error("Unable to attach CommonSnapshotStore to Common Entry, Exit, and Execution adapters.");
       return(INIT_FAILED);
      }
 

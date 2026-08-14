@@ -10,6 +10,7 @@
 #include "../Strategy/RangeMeanReversionStrategy.mqh"
 #include "../Entry/CommonEntryEngineAdapter.mqh"
 #include "../Exit/CommonExitEngineAdapter.mqh"
+#include "CommonExecutionEngineAdapter.mqh"
 #include "DuplicateOrderGuard.mqh"
 #include "ExecutionGate.mqh"
 #include "OrderExecutor.mqh"
@@ -51,6 +52,7 @@ private:
    CTradeResultLogger          m_trade_logger;
    CCommonEntryEngineAdapter   m_entry_adapter;
    CCommonExitEngineAdapter    m_exit_adapter;
+   CCommonExecutionEngineAdapter m_execution_adapter;
    bool                        m_execution_enabled;
    bool                        m_ready;
    string                      m_symbol;
@@ -348,6 +350,10 @@ private:
       m_last_order_request_at=TimeCurrent();
       m_last_global_execution_at=m_last_order_request_at;
       snapshot.last_order_request_at=m_last_order_request_at;
+      SCommonExecutionSnapshot common_execution_snapshot;
+      m_execution_adapter.BeginClose(exit_snapshot,position_ticket,position_type,
+                                     m_last_order_request_at,
+                                     common_execution_snapshot);
       m_exit_adapter.RecordCloseRequest(exit_snapshot,m_last_order_request_at);
       m_trade_logger.InfoOnce(StringFormat("[PIPELINE] Close=REQUESTED;position=%I64u.",
                                            position_ticket));
@@ -377,6 +383,7 @@ private:
                                        close_result.retry_count,
                                        close_result.executed_at,
                                        close_result.description);
+      m_execution_adapter.RecordResult(common_execution_snapshot,close_result);
      }
 
    bool PublishSnapshot(const SExecutionSnapshot &snapshot)
@@ -514,7 +521,9 @@ public:
      {
       const bool entry_attached=m_entry_adapter.SetSnapshotStore(snapshot_store);
       const bool exit_attached=m_exit_adapter.SetSnapshotStore(snapshot_store);
-      return(entry_attached && exit_attached);
+      const bool execution_attached=
+         m_execution_adapter.SetSnapshotStore(snapshot_store);
+      return(entry_attached && exit_attached && execution_attached);
      }
 
    virtual bool       Initialize(CDataBus &data_bus,CParameterManager &parameters)
@@ -539,6 +548,13 @@ public:
                                    parameters.RiskStaleDataLimitSeconds()))
         {
          CLogger::Error("ExecutionEngine requires CommonSnapshotStore for Exit audit.");
+         CBaseEngine::Shutdown();
+         return(false);
+        }
+      if(!m_execution_adapter.Configure(parameters.ExecutionSymbol(),_Period,
+                                        parameters.RiskStaleDataLimitSeconds()))
+        {
+         CLogger::Error("ExecutionEngine requires CommonSnapshotStore for Execution audit.");
          CBaseEngine::Shutdown();
          return(false);
         }
@@ -743,6 +759,10 @@ public:
       m_last_order_request_at=TimeCurrent();
       m_last_global_execution_at=m_last_order_request_at;
       snapshot.last_order_request_at=m_last_order_request_at;
+      SCommonExecutionSnapshot common_execution_snapshot;
+      m_execution_adapter.BeginEntry(entry_snapshot,request,normalized_request,
+                                     m_last_order_request_at,
+                                     common_execution_snapshot);
       m_trade_logger.InfoOnce("[PIPELINE] Order=REQUESTED;"+
                               normalized_request.request_identifier);
       entry_snapshot.order_submitted=true;
@@ -773,6 +793,8 @@ public:
       snapshot.last_execution_result=m_last_execution_result;
       snapshot.last_execution_retcode=m_last_execution_retcode;
       snapshot.last_execution_deal_ticket=m_last_execution_deal_ticket;
+      m_execution_adapter.RecordResult(common_execution_snapshot,
+                                       execution_result);
       m_entry_adapter.Finalize(entry_snapshot);
       PublishSnapshot(snapshot);
       PublishGlobal(snapshot);
@@ -802,6 +824,7 @@ public:
       m_strategy.LogTask007Summary();
       m_entry_adapter.LogSummary();
       m_exit_adapter.LogSummary();
+      m_execution_adapter.LogSummary();
       m_duplicate_guard.Reset();
       CBaseEngine::Shutdown();
      }
