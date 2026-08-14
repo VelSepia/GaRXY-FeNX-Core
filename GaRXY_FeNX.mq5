@@ -25,6 +25,7 @@
 #include "Decision/DecisionScoreEngine.mqh"
 #include "Execution/ExecutionEngine.mqh"
 #include "Recovery/CommonRecoveryEngine.mqh"
+#include "Health/CommonHealthEngine.mqh"
 #include "Test/BacktestValidationReporter.mqh"
 
 //--- Phase3-9.5 execution inputs. Execution remains opt-in for tester safety.
@@ -71,6 +72,7 @@ CConfidenceEngine        g_confidence_engine;
 CDecisionScoreEngine     g_decision_score_engine;
 CExecutionEngine         g_execution_engine;
 CCommonRecoveryEngine    g_common_recovery_engine;
+CCommonHealthEngine      g_common_health_engine;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -173,6 +175,11 @@ int OnInit()
       CLogger::Error("Unable to attach CommonSnapshotStore to CommonRecoveryEngine.");
       return(INIT_FAILED);
      }
+   if(!g_common_health_engine.SetSnapshotStore(g_common_snapshot_store))
+     {
+      CLogger::Error("Unable to attach CommonSnapshotStore to CommonHealthEngine.");
+      return(INIT_FAILED);
+     }
 
    if(!g_controller.RegisterEngine(g_volatility_analyzer))
      {
@@ -269,6 +276,14 @@ int OnInit()
    if(!g_controller.RegisterEngine(g_common_recovery_engine))
      {
       CLogger::Error("Unable to register CommonRecoveryEngine.");
+      return(INIT_FAILED);
+     }
+
+   //--- Final passive observer runs after Recovery and cannot feed its typed
+   //--- diagnostics back into the same tick's trading or state decisions.
+   if(!g_controller.RegisterEngine(g_common_health_engine))
+     {
+      CLogger::Error("Unable to register CommonHealthEngine.");
       return(INIT_FAILED);
      }
 

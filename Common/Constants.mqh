@@ -312,6 +312,12 @@
 #define FENX_COMMON_RECOVERY_SNAPSHOT_VERSION                      "1.0"
 #define FENX_COMMON_RECOVERY_HISTORY_LIMIT                         256
 
+//--- Typed-only Common Health diagnostic contract. Health owns no DataBus
+//--- keys and keeps only a small bounded history of system-state observations.
+#define FENX_COMMON_HEALTH_SNAPSHOT_VERSION                        "1.0"
+#define FENX_COMMON_HEALTH_HISTORY_LIMIT                           64
+#define FENX_COMMON_HEALTH_PERIODIC_AUDIT_SECONDS                  86400
+
 //--- Per-symbol Minimal Execution System DataBus namespace and field names
 #define FENX_DATABUS_NAMESPACE_EXECUTION                           "Execution"
 #define FENX_DATABUS_FIELD_EXECUTION_GATE_ALLOWED                  "ExecutionGateAllowed"
