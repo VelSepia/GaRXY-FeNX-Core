@@ -12,6 +12,7 @@
 #include "../Standby/StandbySnapshot.mqh"
 #include "../Risk/RiskSnapshot.mqh"
 #include "../Entry/EntrySnapshot.mqh"
+#include "../Exit/ExitSnapshot.mqh"
 #include "../Confidence/ConfidenceSnapshot.mqh"
 #include "../Decision/DecisionScoreSnapshot.mqh"
 
@@ -111,6 +112,18 @@ struct SCommonEntrySnapshotRecord
    SEntrySnapshot  entry;
   };
 
+//--- Current typed Common Exit result for one Symbol+Timeframe identity.
+struct SCommonExitSnapshotRecord
+  {
+   string          symbol;
+   ENUM_TIMEFRAMES timeframe;
+   string          snapshot_type;
+   string          snapshot_version;
+   datetime        updated_at;
+   bool            is_valid;
+   SExitSnapshot   exit_snapshot;
+  };
+
 //--- Metadata and typed payload for one Common Confidence identity.
 struct SCommonConfidenceSnapshotRecord
   {
@@ -150,6 +163,8 @@ private:
    SCommonRiskSnapshotRecord        m_risk_records[];
    SCommonEntrySnapshotRecord       m_entry_records[];
    SEntrySnapshot                   m_entry_history[];
+   SCommonExitSnapshotRecord        m_exit_records[];
+   SExitSnapshot                    m_exit_history[];
    SCommonConfidenceSnapshotRecord  m_confidence_records[];
    SCommonDecisionScoreSnapshotRecord m_decision_score_records[];
 
@@ -273,6 +288,18 @@ private:
       return(-1);
      }
 
+   int               FindExitIndex(const string symbol,
+                                    const ENUM_TIMEFRAMES timeframe)
+     {
+      for(int index=0;index<ArraySize(m_exit_records);index++)
+        {
+         if(m_exit_records[index].symbol==symbol &&
+            m_exit_records[index].timeframe==timeframe)
+            return(index);
+        }
+      return(-1);
+     }
+
    //--- Keeps a bounded chronological audit. Re-publishing the same evaluation
    //--- sequence updates its existing record rather than duplicating it.
    bool              StoreEntryHistory(const SEntrySnapshot &snapshot)
@@ -301,6 +328,37 @@ private:
       for(int index=1;index<count;index++)
          m_entry_history[index-1]=m_entry_history[index];
       m_entry_history[count-1]=snapshot;
+      return(true);
+     }
+
+   //--- Retains only the latest bounded Exit evaluations. A close request,
+   //--- result, or final deal updates the matching Sequence in place.
+   bool              StoreExitHistory(const SExitSnapshot &snapshot)
+     {
+      const int count=ArraySize(m_exit_history);
+      for(int index=count-1;index>=0;index--)
+        {
+         if(m_exit_history[index].symbol==snapshot.symbol &&
+            m_exit_history[index].timeframe==snapshot.timeframe &&
+            m_exit_history[index].exit_evaluation_sequence==
+               snapshot.exit_evaluation_sequence)
+           {
+            m_exit_history[index]=snapshot;
+            return(true);
+           }
+        }
+
+      if(count<FENX_COMMON_EXIT_HISTORY_LIMIT)
+        {
+         if(ArrayResize(m_exit_history,count+1)!=(count+1))
+            return(false);
+         m_exit_history[count]=snapshot;
+         return(true);
+        }
+
+      for(int index=1;index<count;index++)
+         m_exit_history[index-1]=m_exit_history[index];
+      m_exit_history[count-1]=snapshot;
       return(true);
      }
 
@@ -745,6 +803,75 @@ public:
       return(true);
      }
 
+   //--- Stores an observed Exit evaluation or close lifecycle update. The
+   //--- current identity is Symbol+Timeframe and the chronological audit is
+   //--- bounded so long Strategy Tester runs cannot grow memory without limit.
+   bool              SetExitSnapshot(const string symbol,
+                                      const ENUM_TIMEFRAMES timeframe,
+                                      const SExitSnapshot &snapshot)
+     {
+      if(StringLen(symbol)==0 || PeriodSeconds(timeframe)<=0 ||
+         snapshot.symbol!=symbol ||
+         snapshot.timeframe!=EnumToString(timeframe) ||
+         StringLen(snapshot.snapshot_version)==0 || snapshot.updated_at<=0 ||
+         snapshot.exit_evaluation_sequence<=0)
+         return(false);
+
+      int index=FindExitIndex(symbol,timeframe);
+      if(index<0)
+        {
+         const int count=ArraySize(m_exit_records);
+         if(ArrayResize(m_exit_records,count+1)!=(count+1))
+            return(false);
+         index=count;
+        }
+
+      m_exit_records[index].symbol=symbol;
+      m_exit_records[index].timeframe=timeframe;
+      m_exit_records[index].snapshot_type="Exit";
+      m_exit_records[index].snapshot_version=snapshot.snapshot_version;
+      m_exit_records[index].updated_at=snapshot.updated_at;
+      m_exit_records[index].is_valid=snapshot.is_valid;
+      m_exit_records[index].exit_snapshot=snapshot;
+      return(StoreExitHistory(snapshot));
+     }
+
+   bool              GetExitSnapshot(const string symbol,
+                                      const ENUM_TIMEFRAMES timeframe,
+                                      SExitSnapshot &snapshot)
+     {
+      const int index=FindExitIndex(symbol,timeframe);
+      if(index<0)
+         return(false);
+      snapshot=m_exit_records[index].exit_snapshot;
+      return(true);
+     }
+
+   bool              HasExitSnapshot(const string symbol,
+                                      const ENUM_TIMEFRAMES timeframe)
+     {
+      return(FindExitIndex(symbol,timeframe)>=0);
+     }
+
+   int               ExitSnapshotCount(void)
+     {
+      return(ArraySize(m_exit_records));
+     }
+
+   int               ExitHistoryCount(void)
+     {
+      return(ArraySize(m_exit_history));
+     }
+
+   bool              GetExitHistorySnapshot(const int index,
+                                             SExitSnapshot &snapshot)
+     {
+      if(index<0 || index>=ArraySize(m_exit_history))
+         return(false);
+      snapshot=m_exit_history[index];
+      return(true);
+     }
+
    //--- Adds or replaces one typed Common Confidence snapshot for a stable
    //--- Symbol+Timeframe identity without altering Environment records.
    bool              SetConfidenceSnapshot(const string symbol,
@@ -862,6 +989,8 @@ public:
       ArrayFree(m_risk_records);
       ArrayFree(m_entry_records);
       ArrayFree(m_entry_history);
+      ArrayFree(m_exit_records);
+      ArrayFree(m_exit_history);
       ArrayFree(m_confidence_records);
       ArrayFree(m_decision_score_records);
      }

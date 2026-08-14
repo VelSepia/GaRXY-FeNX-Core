@@ -9,6 +9,7 @@
 #include "../Engine/BaseEngine.mqh"
 #include "../Strategy/RangeMeanReversionStrategy.mqh"
 #include "../Entry/CommonEntryEngineAdapter.mqh"
+#include "../Exit/CommonExitEngineAdapter.mqh"
 #include "DuplicateOrderGuard.mqh"
 #include "ExecutionGate.mqh"
 #include "OrderExecutor.mqh"
@@ -49,6 +50,7 @@ private:
    COrderExecutor              m_order_executor;
    CTradeResultLogger          m_trade_logger;
    CCommonEntryEngineAdapter   m_entry_adapter;
+   CCommonExitEngineAdapter    m_exit_adapter;
    bool                        m_execution_enabled;
    bool                        m_ready;
    string                      m_symbol;
@@ -296,27 +298,57 @@ private:
      {
       SRangeExitIntent exit_intent;
       m_strategy.EvaluateExit(position_type,exit_intent);
+      SExitSnapshot exit_snapshot;
+      bool new_exit_evaluation=false;
+      m_exit_adapter.ObserveEvaluation(position_ticket,position_type,opened_at,
+                                       exit_intent.should_close,
+                                       exit_intent.signal_price,
+                                       exit_intent.range_midpoint,
+                                       exit_intent.bar_time,exit_intent.reason,
+                                       exit_snapshot,new_exit_evaluation);
       snapshot.data_valid=(exit_intent.bar_time>0);
       snapshot.gate_reason=exit_intent.reason;
       if(exit_intent.bar_time<=0)
+        {
+         m_exit_adapter.RecordEvaluationOutcome(exit_snapshot,false,false,
+                                                exit_intent.reason,
+                                                new_exit_evaluation);
          return;
+        }
       if(exit_intent.bar_time<=opened_at)
         {
          snapshot.gate_reason="Awaiting a completed bar after the position entry.";
+         m_exit_adapter.RecordEvaluationOutcome(exit_snapshot,false,
+                                                exit_intent.should_close,
+                                                snapshot.gate_reason,
+                                                new_exit_evaluation);
          return;
         }
       if(!exit_intent.should_close)
+        {
+         m_exit_adapter.RecordEvaluationOutcome(exit_snapshot,false,false,
+                                                exit_intent.reason,
+                                                new_exit_evaluation);
          return;
+        }
       if(exit_intent.bar_time==m_last_processed_exit_bar_time)
         {
          snapshot.gate_reason="A close request was already attempted for this completed bar.";
+         m_exit_adapter.RecordEvaluationOutcome(exit_snapshot,false,true,
+                                                snapshot.gate_reason,
+                                                new_exit_evaluation);
          return;
         }
+
+      m_exit_adapter.RecordEvaluationOutcome(exit_snapshot,true,false,
+                                             exit_intent.reason,
+                                             new_exit_evaluation);
 
       m_last_processed_exit_bar_time=exit_intent.bar_time;
       m_last_order_request_at=TimeCurrent();
       m_last_global_execution_at=m_last_order_request_at;
       snapshot.last_order_request_at=m_last_order_request_at;
+      m_exit_adapter.RecordCloseRequest(exit_snapshot,m_last_order_request_at);
       m_trade_logger.InfoOnce(StringFormat("[PIPELINE] Close=REQUESTED;position=%I64u.",
                                            position_ticket));
 
@@ -340,6 +372,11 @@ private:
       snapshot.last_execution_retcode=m_last_execution_retcode;
       snapshot.last_execution_deal_ticket=m_last_execution_deal_ticket;
       snapshot.gate_reason=exit_intent.reason;
+      m_exit_adapter.RecordCloseResult(exit_snapshot,close_result.accepted,
+                                       close_result.retcode,
+                                       close_result.retry_count,
+                                       close_result.executed_at,
+                                       close_result.description);
      }
 
    bool PublishSnapshot(const SExecutionSnapshot &snapshot)
@@ -475,7 +512,9 @@ public:
 
    bool              SetSnapshotStore(CCommonSnapshotStore &snapshot_store)
      {
-      return(m_entry_adapter.SetSnapshotStore(snapshot_store));
+      const bool entry_attached=m_entry_adapter.SetSnapshotStore(snapshot_store);
+      const bool exit_attached=m_exit_adapter.SetSnapshotStore(snapshot_store);
+      return(entry_attached && exit_attached);
      }
 
    virtual bool       Initialize(CDataBus &data_bus,CParameterManager &parameters)
@@ -489,9 +528,17 @@ public:
          return(false);
         }
       if(!m_entry_adapter.Configure(parameters.ExecutionSymbol(),_Period,
-                                    parameters.RiskStaleDataLimitSeconds()))
+                                     parameters.RiskStaleDataLimitSeconds()))
         {
          CLogger::Error("ExecutionEngine requires CommonSnapshotStore for Entry audit.");
+         CBaseEngine::Shutdown();
+         return(false);
+        }
+      if(!m_exit_adapter.Configure(parameters.ExecutionSymbol(),_Period,
+                                   parameters.ExecutionMagicNumber(),
+                                   parameters.RiskStaleDataLimitSeconds()))
+        {
+         CLogger::Error("ExecutionEngine requires CommonSnapshotStore for Exit audit.");
          CBaseEngine::Shutdown();
          return(false);
         }
@@ -754,8 +801,16 @@ public:
         }
       m_strategy.LogTask007Summary();
       m_entry_adapter.LogSummary();
+      m_exit_adapter.LogSummary();
       m_duplicate_guard.Reset();
       CBaseEngine::Shutdown();
+     }
+
+   //--- Forwards terminal trade events to the passive Exit observer. Execution
+   //--- and OrderExecutor remain the sole EA-side close path.
+   void              ObserveTradeTransaction(const MqlTradeTransaction &transaction)
+     {
+      m_exit_adapter.ObserveTradeTransaction(transaction);
      }
   };
 

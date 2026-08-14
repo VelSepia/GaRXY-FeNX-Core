@@ -163,7 +163,7 @@ int OnInit()
      }
    if(!g_execution_engine.SetSnapshotStore(g_common_snapshot_store))
      {
-      CLogger::Error("Unable to attach CommonSnapshotStore to Common Entry adapter.");
+      CLogger::Error("Unable to attach CommonSnapshotStore to Common Entry and Exit adapters.");
       return(INIT_FAILED);
      }
 
@@ -278,6 +278,16 @@ void OnDeinit(const int reason)
 void OnTick()
   {
    g_controller.Update();
+  }
+
+//+------------------------------------------------------------------+
+//| Passive trade-transaction observer for Common Exit lifecycle     |
+//+------------------------------------------------------------------+
+void OnTradeTransaction(const MqlTradeTransaction &transaction,
+                        const MqlTradeRequest &request,
+                        const MqlTradeResult &result)
+  {
+   g_execution_engine.ObserveTradeTransaction(transaction);
   }
 
 //+------------------------------------------------------------------+

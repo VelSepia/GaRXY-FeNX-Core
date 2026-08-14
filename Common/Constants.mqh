@@ -295,6 +295,12 @@
 #define FENX_COMMON_ENTRY_SNAPSHOT_VERSION                         "1.0"
 #define FENX_COMMON_ENTRY_HISTORY_LIMIT                            256
 
+//--- Typed-only Common Exit audit contract. Exit decisions, position
+//--- ownership, close requests, and retry behavior remain in the established
+//--- Strategy and Execution pipeline.
+#define FENX_COMMON_EXIT_SNAPSHOT_VERSION                          "1.0"
+#define FENX_COMMON_EXIT_HISTORY_LIMIT                             256
+
 //--- Per-symbol Minimal Execution System DataBus namespace and field names
 #define FENX_DATABUS_NAMESPACE_EXECUTION                           "Execution"
 #define FENX_DATABUS_FIELD_EXECUTION_GATE_ALLOWED                  "ExecutionGateAllowed"
