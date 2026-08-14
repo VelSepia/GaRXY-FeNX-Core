@@ -290,6 +290,11 @@
 //--- Risk.<symbol>.* DataBus interfaces remain authoritative for trading.
 #define FENX_COMMON_RISK_SNAPSHOT_VERSION                          "1.0"
 
+//--- Typed-only Common Entry audit contract. Entry decisions and order
+//--- ownership remain in the established Strategy and Execution pipeline.
+#define FENX_COMMON_ENTRY_SNAPSHOT_VERSION                         "1.0"
+#define FENX_COMMON_ENTRY_HISTORY_LIMIT                            256
+
 //--- Per-symbol Minimal Execution System DataBus namespace and field names
 #define FENX_DATABUS_NAMESPACE_EXECUTION                           "Execution"
 #define FENX_DATABUS_FIELD_EXECUTION_GATE_ALLOWED                  "ExecutionGateAllowed"

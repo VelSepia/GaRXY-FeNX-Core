@@ -8,6 +8,7 @@
 #include "../Common/Logger.mqh"
 #include "../Engine/BaseEngine.mqh"
 #include "../Strategy/RangeMeanReversionStrategy.mqh"
+#include "../Entry/CommonEntryEngineAdapter.mqh"
 #include "DuplicateOrderGuard.mqh"
 #include "ExecutionGate.mqh"
 #include "OrderExecutor.mqh"
@@ -47,6 +48,7 @@ private:
    CPositionManager            m_position_manager;
    COrderExecutor              m_order_executor;
    CTradeResultLogger          m_trade_logger;
+   CCommonEntryEngineAdapter   m_entry_adapter;
    bool                        m_execution_enabled;
    bool                        m_ready;
    string                      m_symbol;
@@ -86,6 +88,64 @@ private:
    int                         m_last_observed_fenx_position_count;
    datetime                    m_last_processed_exit_bar_time;
    string                      m_last_blocked_reason;
+
+   //--- Copies the existing Strategy and ExecutionGate outcomes into the
+   //--- Task018 typed audit. Nothing in this method feeds back into trading.
+   void BeginEntryAudit(const SExecutionGateResult &gate_result,
+                        const SRangeEntryIntent &intent,
+                        const double spread_points,
+                        SEntrySnapshot &entry_snapshot)
+     {
+      m_entry_adapter.Begin(entry_snapshot,TimeCurrent(),intent.bar_time);
+      entry_snapshot.signal_present=intent.has_signal;
+      entry_snapshot.direction_available=intent.direction_available;
+      entry_snapshot.direction=(intent.direction_available ?
+                                DirectionName(intent.direction) : "NONE");
+      entry_snapshot.final_entry_reason=intent.reason;
+      entry_snapshot.entry_blocked=intent.entry_blocked;
+      entry_snapshot.block_stage=intent.block_stage;
+      entry_snapshot.block_reason=intent.block_reason;
+      entry_snapshot.market_selection_available=true;
+      entry_snapshot.market_selection_allowed=gate_result.market_selection_allowed;
+      entry_snapshot.ranking_available=true;
+      entry_snapshot.ranking_allowed=gate_result.ranking_allowed;
+      entry_snapshot.allocation_available=true;
+      entry_snapshot.allocation_allowed=gate_result.allocation_allowed;
+      entry_snapshot.trading_style_available=true;
+      entry_snapshot.trading_style_allowed=gate_result.trading_style_allowed;
+      entry_snapshot.strategy_selection_available=true;
+      entry_snapshot.strategy_selection_allowed=
+         gate_result.strategy_selection_allowed;
+      entry_snapshot.standby_available=true;
+      entry_snapshot.standby_allowed=gate_result.standby_allowed;
+      entry_snapshot.risk_available=true;
+      entry_snapshot.risk_allowed=gate_result.risk_allowed;
+      entry_snapshot.execution_gate_available=true;
+      entry_snapshot.execution_gate_allowed=
+         gate_result.execution_gate_allowed;
+      entry_snapshot.c3_applicable=intent.c3_applicable;
+      entry_snapshot.c3_blocked=intent.c3_blocked;
+      entry_snapshot.task007_applicable=intent.task007_applicable;
+      entry_snapshot.task007_blocked=intent.task007_blocked;
+      entry_snapshot.task011_applicable=intent.task011_applicable;
+      entry_snapshot.task011_blocked=intent.task011_blocked;
+      entry_snapshot.entry_quality_score=intent.score;
+      entry_snapshot.entry_quality_valid=intent.entry_quality_valid;
+      entry_snapshot.position_available=true;
+      entry_snapshot.spread_allowed=(spread_points>=0.0 && gate_result.allowed);
+      entry_snapshot.risk_multiplier=gate_result.allocation_multiplier;
+     }
+
+   //--- Marks an established post-signal stop in the typed audit only.
+   void BlockEntryAudit(SEntrySnapshot &entry_snapshot,const string stage,
+                        const string reason)
+     {
+      entry_snapshot.entry_allowed=false;
+      entry_snapshot.entry_blocked=true;
+      entry_snapshot.final_entry_reason=reason;
+      entry_snapshot.block_stage=stage;
+      entry_snapshot.block_reason=reason;
+     }
 
    void ResetSnapshot(SExecutionSnapshot &snapshot)
      {
@@ -413,6 +473,11 @@ public:
       m_last_blocked_reason="";
      }
 
+   bool              SetSnapshotStore(CCommonSnapshotStore &snapshot_store)
+     {
+      return(m_entry_adapter.SetSnapshotStore(snapshot_store));
+     }
+
    virtual bool       Initialize(CDataBus &data_bus,CParameterManager &parameters)
      {
       if(!CBaseEngine::Initialize(data_bus,parameters))
@@ -420,6 +485,13 @@ public:
       if(m_state_manager==NULL)
         {
          CLogger::Error("ExecutionEngine requires StateManager injection.");
+         CBaseEngine::Shutdown();
+         return(false);
+        }
+      if(!m_entry_adapter.Configure(parameters.ExecutionSymbol(),_Period,
+                                    parameters.RiskStaleDataLimitSeconds()))
+        {
+         CLogger::Error("ExecutionEngine requires CommonSnapshotStore for Entry audit.");
          CBaseEngine::Shutdown();
          return(false);
         }
@@ -551,11 +623,14 @@ public:
          return;
         }
       m_last_processed_bar_time=intent.bar_time;
+      SEntrySnapshot entry_snapshot;
+      BeginEntryAudit(gate_result,intent,spread_points,entry_snapshot);
       if(!intent.has_signal)
         {
          m_no_signal_bar_count++;
          snapshot.gate_reason=intent.reason;
          m_trade_logger.InfoOnce("[PIPELINE] Execution=NO_SIGNAL;"+intent.reason);
+         m_entry_adapter.Finalize(entry_snapshot);
          PublishSnapshot(snapshot);
          PublishGlobal(snapshot);
          return;
@@ -566,8 +641,11 @@ public:
       string request_reason="";
       if(!BuildRequest(intent,tick,gate_result.allocation_multiplier,request,request_reason))
         {
-         FillRequestFields(request,snapshot);
-         RecordEntryBlocked("BuildRequest",request_reason,snapshot);
+          FillRequestFields(request,snapshot);
+          RecordEntryBlocked("BuildRequest",request_reason,snapshot);
+         entry_snapshot.requested_lot=request.volume;
+         BlockEntryAudit(entry_snapshot,"BuildRequest",request_reason);
+         m_entry_adapter.Finalize(entry_snapshot);
          PublishSnapshot(snapshot);
          PublishGlobal(snapshot);
          return;
@@ -575,8 +653,11 @@ public:
       SOrderRequest normalized_request;
       if(!m_order_executor.Prepare(request,normalized_request,request_reason))
         {
-         FillRequestFields(request,snapshot);
-         RecordEntryBlocked("OrderPreparation",request_reason,snapshot);
+          FillRequestFields(request,snapshot);
+          RecordEntryBlocked("OrderPreparation",request_reason,snapshot);
+         entry_snapshot.requested_lot=request.volume;
+         BlockEntryAudit(entry_snapshot,"OrderPreparation",request_reason);
+         m_entry_adapter.Finalize(entry_snapshot);
          PublishSnapshot(snapshot);
          PublishGlobal(snapshot);
          return;
@@ -589,36 +670,55 @@ public:
             request.volume,normalized_request.volume,m_fixed_lot));
         }
       FillRequestFields(normalized_request,snapshot);
+      entry_snapshot.requested_lot=normalized_request.volume;
       const double price_tolerance=SymbolInfoDouble(m_symbol,SYMBOL_POINT);
       if(m_duplicate_guard.IsBlocked(normalized_request,price_tolerance,request_reason))
         {
-         snapshot.duplicate_blocked=true;
-         RecordEntryBlocked("DuplicateGuard",request_reason,snapshot);
+          snapshot.duplicate_blocked=true;
+          RecordEntryBlocked("DuplicateGuard",request_reason,snapshot);
+         entry_snapshot.duplicate_order_result_available=true;
+         entry_snapshot.duplicate_order_allowed=false;
+         BlockEntryAudit(entry_snapshot,"DuplicateGuard",request_reason);
+         m_entry_adapter.Finalize(entry_snapshot);
          PublishSnapshot(snapshot);
          PublishGlobal(snapshot);
          return;
         }
 
+      entry_snapshot.duplicate_order_result_available=true;
+      entry_snapshot.duplicate_order_allowed=true;
+      entry_snapshot.final_order_ready=true;
+      entry_snapshot.entry_allowed=true;
+      entry_snapshot.entry_blocked=false;
+      entry_snapshot.block_stage="";
+      entry_snapshot.block_reason="";
       m_duplicate_guard.MarkAttempt(normalized_request);
       m_last_order_request_at=TimeCurrent();
       m_last_global_execution_at=m_last_order_request_at;
       snapshot.last_order_request_at=m_last_order_request_at;
       m_trade_logger.InfoOnce("[PIPELINE] Order=REQUESTED;"+
                               normalized_request.request_identifier);
+      entry_snapshot.order_submitted=true;
       SOrderExecutionResult execution_result;
       if(m_order_executor.Send(normalized_request,execution_result))
         {
          m_successful_order_count++;
          m_last_execution_result="ACCEPTED: "+execution_result.description;
-         m_trade_logger.InfoOnce("[PIPELINE] Order=ACCEPTED;Execution order accepted: "+
-                                 execution_result.description);
+          m_trade_logger.InfoOnce("[PIPELINE] Order=ACCEPTED;Execution order accepted: "+
+                                  execution_result.description);
+         entry_snapshot.order_succeeded=true;
+         entry_snapshot.final_entry_reason="ORDER_ACCEPTED: "+
+                                           execution_result.description;
         }
       else
         {
          m_failed_order_count++;
          m_last_execution_result="REJECTED: "+execution_result.description;
-         m_trade_logger.ErrorOnce("[PIPELINE] Order=REJECTED;Execution order rejected: "+
-                                  execution_result.description);
+          m_trade_logger.ErrorOnce("[PIPELINE] Order=REJECTED;Execution order rejected: "+
+                                   execution_result.description);
+         entry_snapshot.order_succeeded=false;
+         entry_snapshot.final_entry_reason="ORDER_REJECTED: "+
+                                           execution_result.description;
         }
       m_entry_retry_count+=execution_result.retry_count;
       m_last_execution_retcode=execution_result.retcode;
@@ -626,6 +726,7 @@ public:
       snapshot.last_execution_result=m_last_execution_result;
       snapshot.last_execution_retcode=m_last_execution_retcode;
       snapshot.last_execution_deal_ticket=m_last_execution_deal_ticket;
+      m_entry_adapter.Finalize(entry_snapshot);
       PublishSnapshot(snapshot);
       PublishGlobal(snapshot);
      }
@@ -652,6 +753,7 @@ public:
                                     m_pipeline_block_events[stage]));
         }
       m_strategy.LogTask007Summary();
+      m_entry_adapter.LogSummary();
       m_duplicate_guard.Reset();
       CBaseEngine::Shutdown();
      }

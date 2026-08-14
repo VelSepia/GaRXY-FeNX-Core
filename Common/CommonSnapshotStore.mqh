@@ -11,6 +11,7 @@
 #include "../Environment/MarketStateSnapshot.mqh"
 #include "../Standby/StandbySnapshot.mqh"
 #include "../Risk/RiskSnapshot.mqh"
+#include "../Entry/EntrySnapshot.mqh"
 #include "../Confidence/ConfidenceSnapshot.mqh"
 #include "../Decision/DecisionScoreSnapshot.mqh"
 
@@ -98,6 +99,18 @@ struct SCommonRiskSnapshotRecord
    SRiskSnapshot   risk;
   };
 
+//--- Current typed Common Entry result for one Symbol+Timeframe identity.
+struct SCommonEntrySnapshotRecord
+  {
+   string          symbol;
+   ENUM_TIMEFRAMES timeframe;
+   string          snapshot_type;
+   string          snapshot_version;
+   datetime        updated_at;
+   bool            is_valid;
+   SEntrySnapshot  entry;
+  };
+
 //--- Metadata and typed payload for one Common Confidence identity.
 struct SCommonConfidenceSnapshotRecord
   {
@@ -135,6 +148,8 @@ private:
    SCommonMarketStateSnapshotRecord m_market_state_records[];
    SCommonStandbySnapshotRecord     m_standby_records[];
    SCommonRiskSnapshotRecord        m_risk_records[];
+   SCommonEntrySnapshotRecord       m_entry_records[];
+   SEntrySnapshot                   m_entry_history[];
    SCommonConfidenceSnapshotRecord  m_confidence_records[];
    SCommonDecisionScoreSnapshotRecord m_decision_score_records[];
 
@@ -244,6 +259,49 @@ private:
             return(index);
         }
       return(-1);
+     }
+
+   int               FindEntryIndex(const string symbol,
+                                    const ENUM_TIMEFRAMES timeframe)
+     {
+      for(int index=0;index<ArraySize(m_entry_records);index++)
+        {
+         if(m_entry_records[index].symbol==symbol &&
+            m_entry_records[index].timeframe==timeframe)
+            return(index);
+        }
+      return(-1);
+     }
+
+   //--- Keeps a bounded chronological audit. Re-publishing the same evaluation
+   //--- sequence updates its existing record rather than duplicating it.
+   bool              StoreEntryHistory(const SEntrySnapshot &snapshot)
+     {
+      const int count=ArraySize(m_entry_history);
+      for(int index=count-1;index>=0;index--)
+        {
+         if(m_entry_history[index].symbol==snapshot.symbol &&
+            m_entry_history[index].timeframe==snapshot.timeframe &&
+            m_entry_history[index].entry_evaluation_sequence==
+               snapshot.entry_evaluation_sequence)
+           {
+            m_entry_history[index]=snapshot;
+            return(true);
+           }
+        }
+
+      if(count<FENX_COMMON_ENTRY_HISTORY_LIMIT)
+        {
+         if(ArrayResize(m_entry_history,count+1)!=(count+1))
+            return(false);
+         m_entry_history[count]=snapshot;
+         return(true);
+        }
+
+      for(int index=1;index<count;index++)
+         m_entry_history[index-1]=m_entry_history[index];
+      m_entry_history[count-1]=snapshot;
+      return(true);
      }
 
 public:
@@ -618,6 +676,75 @@ public:
       return(ArraySize(m_risk_records));
      }
 
+   //--- Stores the final result of an existing Entry evaluation. The current
+   //--- identity is updated in place and a separate bounded history retains the
+   //--- latest evaluation records without creating unbounded tester memory.
+   bool              SetEntrySnapshot(const string symbol,
+                                      const ENUM_TIMEFRAMES timeframe,
+                                      const SEntrySnapshot &snapshot)
+     {
+      if(StringLen(symbol)==0 || PeriodSeconds(timeframe)<=0 ||
+         snapshot.symbol!=symbol ||
+         snapshot.timeframe!=EnumToString(timeframe) ||
+         StringLen(snapshot.snapshot_version)==0 || snapshot.updated_at<=0 ||
+         snapshot.entry_evaluation_sequence<=0)
+         return(false);
+
+      int index=FindEntryIndex(symbol,timeframe);
+      if(index<0)
+        {
+         const int count=ArraySize(m_entry_records);
+         if(ArrayResize(m_entry_records,count+1)!=(count+1))
+            return(false);
+         index=count;
+        }
+
+      m_entry_records[index].symbol=symbol;
+      m_entry_records[index].timeframe=timeframe;
+      m_entry_records[index].snapshot_type="Entry";
+      m_entry_records[index].snapshot_version=snapshot.snapshot_version;
+      m_entry_records[index].updated_at=snapshot.updated_at;
+      m_entry_records[index].is_valid=snapshot.is_valid;
+      m_entry_records[index].entry=snapshot;
+      return(StoreEntryHistory(snapshot));
+     }
+
+   bool              GetEntrySnapshot(const string symbol,
+                                      const ENUM_TIMEFRAMES timeframe,
+                                      SEntrySnapshot &snapshot)
+     {
+      const int index=FindEntryIndex(symbol,timeframe);
+      if(index<0)
+         return(false);
+      snapshot=m_entry_records[index].entry;
+      return(true);
+     }
+
+   bool              HasEntrySnapshot(const string symbol,
+                                      const ENUM_TIMEFRAMES timeframe)
+     {
+      return(FindEntryIndex(symbol,timeframe)>=0);
+     }
+
+   int               EntrySnapshotCount(void)
+     {
+      return(ArraySize(m_entry_records));
+     }
+
+   int               EntryHistoryCount(void)
+     {
+      return(ArraySize(m_entry_history));
+     }
+
+   bool              GetEntryHistorySnapshot(const int index,
+                                             SEntrySnapshot &snapshot)
+     {
+      if(index<0 || index>=ArraySize(m_entry_history))
+         return(false);
+      snapshot=m_entry_history[index];
+      return(true);
+     }
+
    //--- Adds or replaces one typed Common Confidence snapshot for a stable
    //--- Symbol+Timeframe identity without altering Environment records.
    bool              SetConfidenceSnapshot(const string symbol,
@@ -733,6 +860,8 @@ public:
       ArrayFree(m_market_state_records);
       ArrayFree(m_standby_records);
       ArrayFree(m_risk_records);
+      ArrayFree(m_entry_records);
+      ArrayFree(m_entry_history);
       ArrayFree(m_confidence_records);
       ArrayFree(m_decision_score_records);
      }

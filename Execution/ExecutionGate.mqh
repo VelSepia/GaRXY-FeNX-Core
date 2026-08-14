@@ -51,6 +51,18 @@ struct SExecutionGateResult
    ENUM_FENX_PIPELINE_STAGE stop_stage;
    string                   stage_reason;
    string                   pipeline_trace;
+
+   //--- Task018 observations of the existing ordered gates. These flags are
+   //--- assigned only beside the established PASS branches and never consumed
+   //--- by the permission calculation.
+   bool                     market_selection_allowed;
+   bool                     ranking_allowed;
+   bool                     allocation_allowed;
+   bool                     trading_style_allowed;
+   bool                     strategy_selection_allowed;
+   bool                     standby_allowed;
+   bool                     risk_allowed;
+   bool                     execution_gate_allowed;
   };
 
 //--- Reads final DataBus permissions and state before a strategy may create an order request.
@@ -163,6 +175,14 @@ private:
       result.stop_stage=FENX_PIPELINE_EXECUTION;
       result.stage_reason=result.reason;
       result.pipeline_trace="";
+      result.market_selection_allowed=false;
+      result.ranking_allowed=false;
+      result.allocation_allowed=false;
+      result.trading_style_allowed=false;
+      result.strategy_selection_allowed=false;
+      result.standby_allowed=false;
+      result.risk_allowed=false;
+      result.execution_gate_allowed=false;
      }
 
    //--- Adds a successful stage to the compact tester trace.
@@ -399,6 +419,7 @@ public:
          return(false);
         }
       AppendPass(trace,FENX_PIPELINE_MARKET_SELECTION);
+      result.market_selection_allowed=true;
 
       if(!pair_ranking_complete || !pair_ranking_fresh || !ranking_data_valid)
         {
@@ -415,6 +436,7 @@ public:
          return(false);
         }
       AppendPass(trace,FENX_PIPELINE_PAIR_RANKING);
+      result.ranking_allowed=true;
 
       if(!capital_allocation_complete || !capital_allocation_fresh || !allocation_data_valid)
         {
@@ -431,6 +453,7 @@ public:
          return(false);
         }
       AppendPass(trace,FENX_PIPELINE_CAPITAL_ALLOCATION);
+      result.allocation_allowed=true;
 
       if(!trading_style_complete || !trading_style_fresh || !style_data_valid || !style_valid)
         {
@@ -447,6 +470,7 @@ public:
          return(false);
         }
       AppendPass(trace,FENX_PIPELINE_TRADING_STYLE);
+      result.trading_style_allowed=true;
 
       if(!strategy_selection_complete || !strategy_selection_fresh || !strategy_data_valid ||
          !strategy_valid || strategy_confidence<m_minimum_strategy_confidence)
@@ -464,6 +488,7 @@ public:
          return(false);
         }
       AppendPass(trace,FENX_PIPELINE_STRATEGY_SELECTION);
+      result.strategy_selection_allowed=true;
 
       if(!standby_complete || !standby_fresh || !standby_system_valid || !standby_data_valid)
         {
@@ -480,6 +505,7 @@ public:
          return(false);
         }
       AppendPass(trace,FENX_PIPELINE_STANDBY);
+      result.standby_allowed=true;
 
       if(!risk_complete || !risk_fresh || !risk_system_valid || !risk_data_valid ||
          risk_confidence<m_minimum_risk_confidence)
@@ -498,6 +524,7 @@ public:
          return(false);
         }
       AppendPass(trace,FENX_PIPELINE_RISK);
+      result.risk_allowed=true;
 
       if(!result.data_valid)
         {
@@ -514,6 +541,7 @@ public:
          return(false);
         }
       result.allowed=true;
+      result.execution_gate_allowed=true;
       result.reason="Execution Gate approved a new USDJPY RANGE mean-reversion entry.";
       result.stop_stage=FENX_PIPELINE_EXECUTION;
       result.stage_reason=result.reason;

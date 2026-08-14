@@ -22,6 +22,21 @@ struct SRangeEntryIntent
    double          range_midpoint;
    datetime        bar_time;
    string          reason;
+
+   //--- Read-only Task018 observations. These fields expose the result of the
+   //--- existing branches without adding or re-evaluating an Entry predicate.
+   bool            direction_available;
+   bool            range_allowed;
+   bool            entry_quality_valid;
+   bool            entry_blocked;
+   string          block_stage;
+   string          block_reason;
+   bool            c3_applicable;
+   bool            c3_blocked;
+   bool            task007_applicable;
+   bool            task007_blocked;
+   bool            task011_applicable;
+   bool            task011_blocked;
   };
 
 //--- Completed-bar exit intent for an existing range mean-reversion position.
@@ -623,6 +638,18 @@ private:
       intent.range_midpoint=0.0;
       intent.bar_time=0;
       intent.reason="No completed-bar range entry is available.";
+      intent.direction_available=false;
+      intent.range_allowed=false;
+      intent.entry_quality_valid=false;
+      intent.entry_blocked=false;
+      intent.block_stage="";
+      intent.block_reason="";
+      intent.c3_applicable=false;
+      intent.c3_blocked=false;
+      intent.task007_applicable=false;
+      intent.task007_blocked=false;
+      intent.task011_applicable=false;
+      intent.task011_blocked=false;
      }
 
    void ResetExitIntent(SRangeExitIntent &intent)
@@ -639,10 +666,11 @@ private:
    //--- the compatibility gate; Task #007 then adapts the evidence weights
    //--- using Trend confidence and explicitly includes published Spread facts.
    bool EvaluateDecisionQuality(const ENUM_ORDER_TYPE direction,
-                                const double range_score,double &quality,
-                                string &reason)
+                                 const double range_score,double &quality,
+                                 string &reason,bool &quality_valid)
      {
       quality=0.0;
+      quality_valid=false;
       double trend_score=0.0;
       double trend_adx=0.0;
       double trend_confidence=0.0;
@@ -704,6 +732,7 @@ private:
          reason="Decision quality inputs are outside their valid ranges.";
          return(false);
         }
+      quality_valid=true;
 
       const double contrarian_trend_quality=
          ClampScore(50.0+(0.5*(direction==ORDER_TYPE_BUY ?
@@ -843,18 +872,26 @@ private:
       const double range_score=intent.score;
       double quality=0.0;
       string quality_reason="";
-      if(!EvaluateDecisionQuality(direction,range_score,quality,quality_reason))
+      bool quality_valid=false;
+      if(!EvaluateDecisionQuality(direction,range_score,quality,quality_reason,
+                                  quality_valid))
         {
          intent.score=quality;
          intent.confidence=quality;
          intent.reason=quality_reason;
+         intent.entry_quality_valid=quality_valid;
+         intent.entry_blocked=true;
+         intent.block_stage="EntryQuality";
+         intent.block_reason=quality_reason;
          return(false);
         }
 
       intent.has_signal=true;
       intent.direction=direction;
+      intent.direction_available=true;
       intent.score=quality;
       intent.confidence=quality;
+      intent.entry_quality_valid=true;
       intent.reason=signal_reason+" "+quality_reason;
       return(true);
      }
@@ -989,6 +1026,7 @@ public:
       intent.bar_time=rates[0].time;
       intent.score=range_score;
       intent.confidence=range_score;
+      intent.range_allowed=true;
 
       // Task #005 entry-quality evidence showed that Tuesday entries degraded
       // both BUY and SELL results across most 2024 months. This categorical
@@ -997,11 +1035,16 @@ public:
       if(TimeToStruct(TimeCurrent(),entry_time) && entry_time.day_of_week==2)
         {
          intent.reason="Entry quality filter rejected a Tuesday range signal.";
+         intent.entry_blocked=true;
+         intent.block_stage="TuesdayEntryQuality";
+         intent.block_reason=intent.reason;
          return(false);
         }
 
       if(m_allow_buy && MathAbs(close_price-lower)<=boundary)
         {
+         intent.direction=ORDER_TYPE_BUY;
+         intent.direction_available=true;
          if(!ApproveEntry(ORDER_TYPE_BUY,
                           "Completed-bar close is near RangeLower.",intent))
             return(false);
@@ -1013,9 +1056,16 @@ public:
         }
       if(m_allow_sell && MathAbs(close_price-upper)<=boundary)
         {
+         intent.direction=ORDER_TYPE_SELL;
+         intent.direction_available=true;
+         intent.c3_applicable=true;
          string filter_reason="";
          if(!PassesTask015C3SellFilter(intent.bar_time,filter_reason))
            {
+            intent.c3_blocked=true;
+            intent.entry_blocked=true;
+            intent.block_stage="C3";
+            intent.block_reason=filter_reason;
             STask007ConfidenceGateState overlap_state;
             const bool overlap_loaded=ReadTask007GateState(overlap_state);
             const bool task007_match=
@@ -1032,17 +1082,27 @@ public:
                           "Completed-bar close is near RangeUpper.",intent))
             return(false);
          string gate_reason="";
+         intent.task007_applicable=true;
          if(!PassesTask007ConfidenceGate(ORDER_TYPE_SELL,intent.bar_time,
                                          gate_reason))
            {
+            intent.task007_blocked=true;
+            intent.entry_blocked=true;
+            intent.block_stage="Task007";
+            intent.block_reason=gate_reason;
             AuditTask011UpstreamBlock(ORDER_TYPE_SELL,intent.bar_time,true,false);
             intent.has_signal=false;
             intent.reason=gate_reason;
             return(false);
            }
+         intent.task011_applicable=true;
          if(!PassesTask011BottleneckGate(ORDER_TYPE_SELL,intent.bar_time,
                                          gate_reason))
            {
+            intent.task011_blocked=true;
+            intent.entry_blocked=true;
+            intent.block_stage="Task011";
+            intent.block_reason=gate_reason;
             intent.has_signal=false;
             intent.reason=gate_reason;
             return(false);

@@ -161,6 +161,11 @@ int OnInit()
       CLogger::Error("Unable to attach CommonSnapshotStore to DecisionScoreEngine.");
       return(INIT_FAILED);
      }
+   if(!g_execution_engine.SetSnapshotStore(g_common_snapshot_store))
+     {
+      CLogger::Error("Unable to attach CommonSnapshotStore to Common Entry adapter.");
+      return(INIT_FAILED);
+     }
 
    if(!g_controller.RegisterEngine(g_volatility_analyzer))
      {
