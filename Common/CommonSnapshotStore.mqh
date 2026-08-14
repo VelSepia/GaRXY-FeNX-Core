@@ -14,6 +14,7 @@
 #include "../Entry/EntrySnapshot.mqh"
 #include "../Exit/ExitSnapshot.mqh"
 #include "../Execution/ExecutionSnapshot.mqh"
+#include "../Recovery/RecoverySnapshot.mqh"
 #include "../Confidence/ConfidenceSnapshot.mqh"
 #include "../Decision/DecisionScoreSnapshot.mqh"
 
@@ -137,6 +138,18 @@ struct SCommonExecutionSnapshotRecord
    SCommonExecutionSnapshot execution;
   };
 
+//--- Current typed Common Recovery observation for one Symbol+Timeframe.
+struct SCommonRecoverySnapshotRecord
+  {
+   string                   symbol;
+   ENUM_TIMEFRAMES          timeframe;
+   string                   snapshot_type;
+   string                   snapshot_version;
+   datetime                 updated_at;
+   bool                     is_valid;
+   SCommonRecoverySnapshot  recovery;
+  };
+
 //--- Metadata and typed payload for one Common Confidence identity.
 struct SCommonConfidenceSnapshotRecord
   {
@@ -180,6 +193,8 @@ private:
    SExitSnapshot                    m_exit_history[];
    SCommonExecutionSnapshotRecord   m_execution_records[];
    SCommonExecutionSnapshot         m_execution_history[];
+   SCommonRecoverySnapshotRecord    m_recovery_records[];
+   SCommonRecoverySnapshot          m_recovery_history[];
    SCommonConfidenceSnapshotRecord  m_confidence_records[];
    SCommonDecisionScoreSnapshotRecord m_decision_score_records[];
 
@@ -327,6 +342,18 @@ private:
       return(-1);
      }
 
+   int               FindRecoveryIndex(const string symbol,
+                                        const ENUM_TIMEFRAMES timeframe)
+     {
+      for(int index=0;index<ArraySize(m_recovery_records);index++)
+        {
+         if(m_recovery_records[index].symbol==symbol &&
+            m_recovery_records[index].timeframe==timeframe)
+            return(index);
+        }
+      return(-1);
+     }
+
    //--- Keeps a bounded chronological audit. Re-publishing the same evaluation
    //--- sequence updates its existing record rather than duplicating it.
    bool              StoreEntryHistory(const SEntrySnapshot &snapshot)
@@ -417,6 +444,37 @@ private:
       for(int index=1;index<count;index++)
          m_execution_history[index-1]=m_execution_history[index];
       m_execution_history[count-1]=snapshot;
+      return(true);
+     }
+
+   //--- Retains only state/condition-change Recovery audits. Each audit has a
+   //--- unique sequence while RecoverySequence links one lifecycle end-to-end.
+   bool              StoreRecoveryHistory(const SCommonRecoverySnapshot &snapshot)
+     {
+      const int count=ArraySize(m_recovery_history);
+      for(int index=count-1;index>=0;index--)
+        {
+         if(m_recovery_history[index].symbol==snapshot.symbol &&
+            m_recovery_history[index].timeframe==snapshot.timeframe &&
+            m_recovery_history[index].recovery_audit_sequence==
+               snapshot.recovery_audit_sequence)
+           {
+            m_recovery_history[index]=snapshot;
+            return(true);
+           }
+        }
+
+      if(count<FENX_COMMON_RECOVERY_HISTORY_LIMIT)
+        {
+         if(ArrayResize(m_recovery_history,count+1)!=(count+1))
+            return(false);
+         m_recovery_history[count]=snapshot;
+         return(true);
+        }
+
+      for(int index=1;index<count;index++)
+         m_recovery_history[index-1]=m_recovery_history[index];
+      m_recovery_history[count-1]=snapshot;
       return(true);
      }
 
@@ -998,6 +1056,74 @@ public:
       return(true);
      }
 
+   //--- Stores one passive, already-observed Common Recovery audit. The store
+   //--- does not request recovery, grant Entry permission, or write StateManager.
+   bool              SetRecoverySnapshot(const string symbol,
+                                          const ENUM_TIMEFRAMES timeframe,
+                                          const SCommonRecoverySnapshot &snapshot)
+     {
+      if(StringLen(symbol)==0 || PeriodSeconds(timeframe)<=0 ||
+         snapshot.symbol!=symbol ||
+         snapshot.timeframe!=EnumToString(timeframe) ||
+         StringLen(snapshot.snapshot_version)==0 || snapshot.updated_at<=0 ||
+         snapshot.recovery_audit_sequence<=0)
+         return(false);
+
+      int index=FindRecoveryIndex(symbol,timeframe);
+      if(index<0)
+        {
+         const int count=ArraySize(m_recovery_records);
+         if(ArrayResize(m_recovery_records,count+1)!=(count+1))
+            return(false);
+         index=count;
+        }
+
+      m_recovery_records[index].symbol=symbol;
+      m_recovery_records[index].timeframe=timeframe;
+      m_recovery_records[index].snapshot_type="Recovery";
+      m_recovery_records[index].snapshot_version=snapshot.snapshot_version;
+      m_recovery_records[index].updated_at=snapshot.updated_at;
+      m_recovery_records[index].is_valid=snapshot.is_valid;
+      m_recovery_records[index].recovery=snapshot;
+      return(StoreRecoveryHistory(snapshot));
+     }
+
+   bool              GetRecoverySnapshot(const string symbol,
+                                          const ENUM_TIMEFRAMES timeframe,
+                                          SCommonRecoverySnapshot &snapshot)
+     {
+      const int index=FindRecoveryIndex(symbol,timeframe);
+      if(index<0)
+         return(false);
+      snapshot=m_recovery_records[index].recovery;
+      return(true);
+     }
+
+   bool              HasRecoverySnapshot(const string symbol,
+                                          const ENUM_TIMEFRAMES timeframe)
+     {
+      return(FindRecoveryIndex(symbol,timeframe)>=0);
+     }
+
+   int               RecoverySnapshotCount(void)
+     {
+      return(ArraySize(m_recovery_records));
+     }
+
+   int               RecoveryHistoryCount(void)
+     {
+      return(ArraySize(m_recovery_history));
+     }
+
+   bool              GetRecoveryHistorySnapshot(const int index,
+                                                 SCommonRecoverySnapshot &snapshot)
+     {
+      if(index<0 || index>=ArraySize(m_recovery_history))
+         return(false);
+      snapshot=m_recovery_history[index];
+      return(true);
+     }
+
    //--- Adds or replaces one typed Common Confidence snapshot for a stable
    //--- Symbol+Timeframe identity without altering Environment records.
    bool              SetConfidenceSnapshot(const string symbol,
@@ -1119,6 +1245,8 @@ public:
       ArrayFree(m_exit_history);
       ArrayFree(m_execution_records);
       ArrayFree(m_execution_history);
+      ArrayFree(m_recovery_records);
+      ArrayFree(m_recovery_history);
       ArrayFree(m_confidence_records);
       ArrayFree(m_decision_score_records);
      }

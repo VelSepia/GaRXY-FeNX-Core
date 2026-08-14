@@ -307,6 +307,11 @@
 #define FENX_COMMON_EXECUTION_SNAPSHOT_VERSION                     "1.0"
 #define FENX_COMMON_EXECUTION_HISTORY_LIMIT                        256
 
+//--- Typed-only Common Recovery audit contract. Recovery detail remains in
+//--- CCommonSnapshotStore and introduces no DataBus capacity requirement.
+#define FENX_COMMON_RECOVERY_SNAPSHOT_VERSION                      "1.0"
+#define FENX_COMMON_RECOVERY_HISTORY_LIMIT                         256
+
 //--- Per-symbol Minimal Execution System DataBus namespace and field names
 #define FENX_DATABUS_NAMESPACE_EXECUTION                           "Execution"
 #define FENX_DATABUS_FIELD_EXECUTION_GATE_ALLOWED                  "ExecutionGateAllowed"
