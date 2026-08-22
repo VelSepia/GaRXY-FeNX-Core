@@ -7,6 +7,7 @@
 #include "../Common/Constants.mqh"
 #include "../Common/Logger.mqh"
 #include "../Common/CommonSnapshotStore.mqh"
+#include "../Core/AnalysisContextBinding.mqh"
 #include "../Engine/BaseEngine.mqh"
 
 //--- Detects stable, non-directional price ranges from completed candles only.
@@ -26,6 +27,9 @@ private:
    int    m_freshness_limit_seconds;
    bool   m_consistency_verified;
    CCommonSnapshotStore *m_snapshot_store;
+   CAnalysisContextBinding m_context;
+   long   m_update_count;
+   long   m_snapshot_count;
 
    void ResetSnapshot(SRangeSnapshot &snapshot)
      {
@@ -47,7 +51,9 @@ private:
          return(false);
 
       string atr_text="";
-      if(!m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_ATR,atr_text))
+      if(!m_context.ReadGlobalLegacy(m_data_bus,
+            FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"ATR",
+            FENX_DATABUS_KEY_ENVIRONMENT_ATR,atr_text))
          return(false);
 
       atr=StringToDouble(atr_text);
@@ -187,7 +193,7 @@ private:
       if(!CalculateStableBoundaries(rates,bar_count,upper,lower))
          return(false);
 
-      const double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
+      const double point=SymbolInfoDouble(m_context.Symbol(),SYMBOL_POINT);
       const double width=upper-lower;
       if(point<=0.0 || width<=0.0)
          return(false);
@@ -231,37 +237,57 @@ private:
       if(m_data_bus==NULL)
          return(false);
 
-      const int symbol_digits=(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS);
+      const int symbol_digits=(int)SymbolInfoInteger(m_context.Symbol(),SYMBOL_DIGITS);
       bool success=true;
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_UPPER,
-                             DoubleToString(snapshot.upper,symbol_digits)))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,
+             FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Upper",
+             FENX_DATABUS_KEY_ENVIRONMENT_RANGE_UPPER,
+             DoubleToString(snapshot.upper,symbol_digits)))
          success=false;
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_LOWER,
-                             DoubleToString(snapshot.lower,symbol_digits)))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,
+             FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Lower",
+             FENX_DATABUS_KEY_ENVIRONMENT_RANGE_LOWER,
+             DoubleToString(snapshot.lower,symbol_digits)))
          success=false;
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_WIDTH_POINTS,
-                             DoubleToString(snapshot.width_points,2)))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,
+             FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"WidthPoints",
+             FENX_DATABUS_KEY_ENVIRONMENT_RANGE_WIDTH_POINTS,
+             DoubleToString(snapshot.width_points,2)))
          success=false;
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_MIDPOINT,
-                             DoubleToString(snapshot.midpoint,symbol_digits)))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,
+             FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Midpoint",
+             FENX_DATABUS_KEY_ENVIRONMENT_RANGE_MIDPOINT,
+             DoubleToString(snapshot.midpoint,symbol_digits)))
          success=false;
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_POSITION,
-                             DoubleToString(snapshot.position,4)))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,
+             FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Position",
+             FENX_DATABUS_KEY_ENVIRONMENT_RANGE_POSITION,
+             DoubleToString(snapshot.position,4)))
          success=false;
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_SCORE,
-                             DoubleToString(snapshot.score,2)))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,
+             FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Score",
+             FENX_DATABUS_KEY_ENVIRONMENT_RANGE_SCORE,
+             DoubleToString(snapshot.score,2)))
          success=false;
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_IS_RANGE,
-                             (snapshot.is_range ? "true" : "false")))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,
+             FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"IsRange",
+             FENX_DATABUS_KEY_ENVIRONMENT_IS_RANGE,
+             (snapshot.is_range ? "true" : "false")))
          success=false;
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_DATA_VALID,
-                             (snapshot.is_data_valid ? "true" : "false")))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,
+             FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"IsDataValid",
+             FENX_DATABUS_KEY_ENVIRONMENT_RANGE_DATA_VALID,
+             (snapshot.is_data_valid ? "true" : "false")))
          success=false;
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_UPDATED_AT,
-                             TimeToString(snapshot.updated_at,TIME_DATE|TIME_SECONDS)))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,
+             FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"UpdatedAt",
+             FENX_DATABUS_KEY_ENVIRONMENT_RANGE_UPDATED_AT,
+             TimeToString(snapshot.updated_at,TIME_DATE|TIME_SECONDS)))
          success=false;
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_CLOSED_BAR_TIME,
-                             TimeToString(snapshot.closed_bar_time,TIME_DATE|TIME_SECONDS)))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,
+             FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"ClosedBarTime",
+             FENX_DATABUS_KEY_ENVIRONMENT_RANGE_CLOSED_BAR_TIME,
+             TimeToString(snapshot.closed_bar_time,TIME_DATE|TIME_SECONDS)))
          success=false;
 
       return(success);
@@ -272,15 +298,15 @@ private:
    //--- boundary, score, or IsRange calculation is repeated here.
    void BuildTypedSnapshot(SRangeSnapshot &snapshot,const double atr)
      {
-      const int digits=(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS);
+      const int digits=(int)SymbolInfoInteger(m_context.Symbol(),SYMBOL_DIGITS);
       snapshot.upper=StringToDouble(DoubleToString(snapshot.upper,digits));
       snapshot.lower=StringToDouble(DoubleToString(snapshot.lower,digits));
       snapshot.width_points=StringToDouble(DoubleToString(snapshot.width_points,2));
       snapshot.midpoint=StringToDouble(DoubleToString(snapshot.midpoint,digits));
       snapshot.position=StringToDouble(DoubleToString(snapshot.position,4));
       snapshot.score=StringToDouble(DoubleToString(snapshot.score,2));
-      snapshot.symbol=_Symbol;
-      snapshot.timeframe=EnumToString(_Period);
+      snapshot.symbol=m_context.Symbol();
+      snapshot.timeframe=EnumToString(m_context.Timeframe());
       snapshot.snapshot_version=FENX_COMMON_RANGE_SNAPSHOT_VERSION;
       snapshot.is_valid=false;
       snapshot.is_fresh=false;
@@ -289,7 +315,7 @@ private:
       snapshot.source_bar_time=snapshot.closed_bar_time;
       snapshot.lookback=m_lookback_bars;
       snapshot.price_digits=digits;
-      snapshot.point_size=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
+      snapshot.point_size=SymbolInfoDouble(m_context.Symbol(),SYMBOL_POINT);
       snapshot.source_atr=atr;
       snapshot.atr_updated_at=0;
       CRangeSnapshotContract contract;
@@ -322,30 +348,30 @@ private:
    bool StoreTypedSnapshot(const SRangeSnapshot &snapshot)
      {
       if(m_snapshot_store==NULL ||
-         !m_snapshot_store.SetRangeSnapshot(_Symbol,_Period,snapshot))
+         !m_snapshot_store.SetRangeSnapshot(m_context.Symbol(),m_context.Timeframe(),snapshot))
          return(false);
       if(m_consistency_verified)
          return(true);
 
       SRangeSnapshot stored;
-      if(!m_snapshot_store.GetRangeSnapshot(_Symbol,_Period,stored) ||
+      if(!m_snapshot_store.GetRangeSnapshot(m_context.Symbol(),m_context.Timeframe(),stored) ||
          !SameTypedSnapshot(snapshot,stored))
          return(false);
 
       string upper="",lower="",width="",midpoint="",position="",score="";
       string is_range="",is_valid="",updated="",closed_bar="";
-      const int digits=(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS);
+      const int digits=(int)SymbolInfoInteger(m_context.Symbol(),SYMBOL_DIGITS);
       if(m_data_bus==NULL ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_UPPER,upper) ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_LOWER,lower) ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_WIDTH_POINTS,width) ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_MIDPOINT,midpoint) ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_POSITION,position) ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_SCORE,score) ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_IS_RANGE,is_range) ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_DATA_VALID,is_valid) ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_UPDATED_AT,updated) ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_CLOSED_BAR_TIME,closed_bar))
+         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Upper",FENX_DATABUS_KEY_ENVIRONMENT_RANGE_UPPER,upper) ||
+         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Lower",FENX_DATABUS_KEY_ENVIRONMENT_RANGE_LOWER,lower) ||
+         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"WidthPoints",FENX_DATABUS_KEY_ENVIRONMENT_RANGE_WIDTH_POINTS,width) ||
+         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Midpoint",FENX_DATABUS_KEY_ENVIRONMENT_RANGE_MIDPOINT,midpoint) ||
+         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Position",FENX_DATABUS_KEY_ENVIRONMENT_RANGE_POSITION,position) ||
+         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Score",FENX_DATABUS_KEY_ENVIRONMENT_RANGE_SCORE,score) ||
+         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"IsRange",FENX_DATABUS_KEY_ENVIRONMENT_IS_RANGE,is_range) ||
+         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"IsDataValid",FENX_DATABUS_KEY_ENVIRONMENT_RANGE_DATA_VALID,is_valid) ||
+         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"UpdatedAt",FENX_DATABUS_KEY_ENVIRONMENT_RANGE_UPDATED_AT,updated) ||
+         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"ClosedBarTime",FENX_DATABUS_KEY_ENVIRONMENT_RANGE_CLOSED_BAR_TIME,closed_bar))
          return(false);
 
       return(upper==DoubleToString(snapshot.upper,digits) &&
@@ -377,6 +403,15 @@ public:
       m_freshness_limit_seconds=0;
       m_consistency_verified=false;
       m_snapshot_store=NULL;
+      m_update_count=0;
+      m_snapshot_count=0;
+     }
+
+   bool              SetRuntimeContext(const SRuntimeContextId &context_id,
+                                       const bool publish_primary_legacy)
+     {
+      return(!m_initialized &&
+             m_context.Configure(context_id,publish_primary_legacy));
      }
 
    //--- Injects the non-owning typed store before framework initialization.
@@ -434,6 +469,7 @@ public:
      {
       if(!m_initialized)
          return;
+      m_update_count++;
 
       SRangeSnapshot snapshot;
       ResetSnapshot(snapshot);
@@ -441,7 +477,8 @@ public:
       double atr=0.0;
       MqlRates rates[];
       // start_pos=1 excludes the current forming candle; the copied array is oldest to newest.
-      const int copied=CopyRates(_Symbol,PERIOD_CURRENT,1,m_lookback_bars,rates);
+      const int copied=CopyRates(m_context.Symbol(),m_context.Timeframe(),1,
+                                 m_lookback_bars,rates);
       if(!ReadAtrFromDataBus(atr) || copied!=m_lookback_bars ||
          !BuildSnapshot(rates,copied,atr,snapshot))
         {
@@ -460,6 +497,7 @@ public:
          CLogger::Error("RangeDetector could not store or verify its typed snapshot.");
          return;
         }
+      m_snapshot_count++;
       if(!m_consistency_verified)
         {
          CLogger::Info(StringFormat(
@@ -477,6 +515,10 @@ public:
       m_consistency_verified=false;
       CBaseEngine::Shutdown();
      }
+
+   long              UpdateCount(void) { return(m_update_count); }
+   long              SnapshotCount(void) { return(m_snapshot_count); }
+   SRuntimeContextId ContextId(void) { return(m_context.Id()); }
   };
 
 #endif // FENX_ENVIRONMENT_RANGE_DETECTOR_MQH

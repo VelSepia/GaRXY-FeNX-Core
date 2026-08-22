@@ -20,11 +20,79 @@ private:
    CStateManager  m_state_manager;
    CRuntimeContextRegistry m_runtime_context_registry;
    bool           m_initialized;
+   bool           m_runtime_contexts_prepared;
 
 public:
                      CCoreController(void)
      {
       m_initialized=false;
+      m_runtime_contexts_prepared=false;
+     }
+
+   //--- Creates context-owned analysis instances before registration. The
+   //--- conservative preflight includes legacy migration keys and reserves at
+   //--- least 30% of DataBus capacity for subsequent Common engines.
+   bool              PrepareRuntimeContexts(CParameterManager &parameters,
+                                            CCommonSnapshotStore &snapshot_store,
+                                            const bool validate_broker_symbols=true)
+     {
+      if(m_initialized)
+         return(false);
+      if(m_runtime_contexts_prepared)
+         return(true);
+      if(!m_runtime_context_registry.Initialize(parameters,
+                                                validate_broker_symbols) ||
+         !m_runtime_context_registry.PrepareAnalysis(snapshot_store))
+        {
+         m_runtime_context_registry.Clear();
+         return(false);
+        }
+
+      const int configured_symbols=parameters.MarketSelectionSymbolCount();
+      const int available_contexts=
+         m_runtime_context_registry.AvailableContextCount();
+      const int estimated_databus_entries=
+         FENX_DATABUS_BASELINE_FIXED_ENTRIES+
+         FENX_DATABUS_BASELINE_PER_SYMBOL_ENTRIES*configured_symbols+
+         FENX_COMMON_ENVIRONMENT_KEY_COUNT+
+         FENX_COMMON_CONFIDENCE_GLOBAL_KEY_COUNT+
+         FENX_COMMON_DECISION_GLOBAL_KEY_COUNT+
+         (FENX_COMMON_CONFIDENCE_PER_SYMBOL_KEY_COUNT+
+          FENX_COMMON_DECISION_PER_SYMBOL_KEY_COUNT)*configured_symbols+
+         FENX_ANALYSIS_CONTEXT_KEY_COUNT*available_contexts;
+      const int estimated_engine_count=
+         m_engine_manager.Count()+
+         FENX_ANALYSIS_ENGINES_PER_CONTEXT*available_contexts;
+      const int maximum_safe_entries=(int)MathFloor(
+         FENX_DATABUS_CAPACITY*(1.0-FENX_DATABUS_MINIMUM_SPARE_RATIO));
+      SRuntimeContextPreflight runtime_preflight;
+      if(estimated_databus_entries>maximum_safe_entries ||
+         !m_runtime_context_registry.ValidateCapacityPreflight(
+            estimated_databus_entries,estimated_engine_count,runtime_preflight))
+        {
+         m_runtime_context_registry.Clear();
+         CLogger::Error("Runtime context analysis capacity preflight failed.");
+         return(false);
+        }
+
+      CLogger::Info(StringFormat(
+         "[CONTEXT CAPACITY] Contexts=%d;EstimatedKeys=%d;Capacity=%d;Remaining=%d;RemainingRatio=%.2f%%;AnalysisEngines=%d",
+         available_contexts,estimated_databus_entries,FENX_DATABUS_CAPACITY,
+         FENX_DATABUS_CAPACITY-estimated_databus_entries,
+         100.0*(FENX_DATABUS_CAPACITY-estimated_databus_entries)/
+               FENX_DATABUS_CAPACITY,
+         FENX_ANALYSIS_ENGINES_PER_CONTEXT*available_contexts));
+      m_runtime_contexts_prepared=true;
+      return(true);
+     }
+
+   //--- Must be called before global portfolio/downstream registration so all
+   //--- context analysis pipelines complete first on every scheduler tick.
+   bool              RegisterRuntimeContextAnalysisEngines(void)
+     {
+      if(!m_runtime_contexts_prepared || m_initialized)
+         return(false);
+      return(m_runtime_context_registry.RegisterAnalysis(m_engine_manager));
      }
 
    bool              Initialize(CParameterManager &parameters)
@@ -35,9 +103,10 @@ public:
          return(true);
         }
 
-      // Runtime contexts are validated before any engine can initialize or
-      // trade. Existing engines remain on their legacy global-state path.
-      if(!m_runtime_context_registry.Initialize(parameters,true))
+      // Legacy harnesses that do not promote analysis engines retain the
+      // Task026 registry-only initialization path.
+      if(!m_runtime_context_registry.IsInitialized() &&
+         !m_runtime_context_registry.Initialize(parameters,true))
         {
          CLogger::Error("CoreController runtime context initialization failed.");
          return(false);
@@ -112,6 +181,7 @@ public:
       m_runtime_context_registry.Clear();
       m_data_bus.Clear();
       m_initialized=false;
+      m_runtime_contexts_prepared=false;
       CLogger::Info("CoreController shut down.");
      }
 

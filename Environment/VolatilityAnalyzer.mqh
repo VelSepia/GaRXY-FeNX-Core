@@ -7,6 +7,7 @@
 #include "../Common/Constants.mqh"
 #include "../Common/Logger.mqh"
 #include "../Common/CommonSnapshotStore.mqh"
+#include "../Core/AnalysisContextBinding.mqh"
 #include "../Engine/BaseEngine.mqh"
 
 //--- Publishes ATR-based market-volatility facts without trading decisions.
@@ -21,6 +22,9 @@ private:
    int    m_freshness_limit_seconds;
    bool   m_consistency_verified;
    CCommonSnapshotStore *m_snapshot_store;
+   CAnalysisContextBinding m_context;
+   long   m_update_count;
+   long   m_snapshot_count;
 
    bool ReadSnapshot(double &atr,double &score)
      {
@@ -53,16 +57,22 @@ private:
       if(m_data_bus==NULL)
          return(false);
 
-      const int symbol_digits=(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS);
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_ATR,
-                             DoubleToString(atr,symbol_digits)))
+      const int symbol_digits=(int)SymbolInfoInteger(m_context.Symbol(),SYMBOL_DIGITS);
+      if(!m_context.PublishGlobalLegacy(m_data_bus,
+             FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"ATR",
+             FENX_DATABUS_KEY_ENVIRONMENT_ATR,
+             DoubleToString(atr,symbol_digits)))
          return(false);
 
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_VOLATILITY_SCORE,
-                             DoubleToString(score,2)))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,
+             FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"Score",
+             FENX_DATABUS_KEY_ENVIRONMENT_VOLATILITY_SCORE,
+             DoubleToString(score,2)))
          return(false);
 
-      return(m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_VOLATILITY_LEVEL,level));
+      return(m_context.PublishGlobalLegacy(m_data_bus,
+             FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"Level",
+             FENX_DATABUS_KEY_ENVIRONMENT_VOLATILITY_LEVEL,level));
      }
 
    //--- Builds a typed mirror from the values already published to the legacy
@@ -72,15 +82,15 @@ private:
                            SVolatilitySnapshot &snapshot)
      {
       const datetime observed_at=TimeCurrent();
-      const int symbol_digits=(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS);
+      const int symbol_digits=(int)SymbolInfoInteger(m_context.Symbol(),SYMBOL_DIGITS);
       CVolatilitySnapshotContract contract;
-      contract.Reset(snapshot,_Symbol,_Period,observed_at,m_atr_period,0,
+      contract.Reset(snapshot,m_context.Symbol(),m_context.Timeframe(),observed_at,m_atr_period,0,
                      m_baseline_samples);
       snapshot.atr=StringToDouble(DoubleToString(atr,symbol_digits));
       snapshot.volatility_score=StringToDouble(DoubleToString(score,2));
       snapshot.volatility_level=level;
       snapshot.source_updated_at=observed_at;
-      snapshot.source_bar_time=iTime(_Symbol,_Period,0);
+      snapshot.source_bar_time=iTime(m_context.Symbol(),m_context.Timeframe(),0);
       return(contract.Finalize(snapshot,observed_at,m_freshness_limit_seconds));
      }
 
@@ -106,26 +116,30 @@ private:
    bool StoreTypedSnapshot(const SVolatilitySnapshot &snapshot)
      {
       if(m_snapshot_store==NULL ||
-         !m_snapshot_store.SetVolatilitySnapshot(_Symbol,_Period,snapshot))
+         !m_snapshot_store.SetVolatilitySnapshot(m_context.Symbol(),m_context.Timeframe(),snapshot))
          return(false);
       if(m_consistency_verified)
          return(true);
 
       SVolatilitySnapshot stored;
-      if(!m_snapshot_store.GetVolatilitySnapshot(_Symbol,_Period,stored) ||
+      if(!m_snapshot_store.GetVolatilitySnapshot(m_context.Symbol(),m_context.Timeframe(),stored) ||
          !SameTypedSnapshot(snapshot,stored))
          return(false);
 
       string atr_text="";
       string score_text="";
       string level_text="";
-      const int symbol_digits=(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS);
+      const int symbol_digits=(int)SymbolInfoInteger(m_context.Symbol(),SYMBOL_DIGITS);
       if(m_data_bus==NULL ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_ATR,atr_text) ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_VOLATILITY_SCORE,
-                                score_text) ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_VOLATILITY_LEVEL,
-                                level_text))
+         !m_context.ReadGlobalLegacy(m_data_bus,
+            FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"ATR",
+            FENX_DATABUS_KEY_ENVIRONMENT_ATR,atr_text) ||
+         !m_context.ReadGlobalLegacy(m_data_bus,
+            FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"Score",
+            FENX_DATABUS_KEY_ENVIRONMENT_VOLATILITY_SCORE,score_text) ||
+         !m_context.ReadGlobalLegacy(m_data_bus,
+            FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"Level",
+            FENX_DATABUS_KEY_ENVIRONMENT_VOLATILITY_LEVEL,level_text))
          return(false);
       return(atr_text==DoubleToString(snapshot.atr,symbol_digits) &&
              score_text==DoubleToString(snapshot.volatility_score,2) &&
@@ -144,6 +158,17 @@ public:
       m_freshness_limit_seconds=0;
       m_consistency_verified=false;
       m_snapshot_store=NULL;
+      m_update_count=0;
+      m_snapshot_count=0;
+     }
+
+   //--- Binds this instance to one explicit Symbol+Timeframe before handles
+   //--- are created. Only the primary instance may publish legacy aliases.
+   bool              SetRuntimeContext(const SRuntimeContextId &context_id,
+                                       const bool publish_primary_legacy)
+     {
+      return(!m_initialized &&
+             m_context.Configure(context_id,publish_primary_legacy));
      }
 
    //--- Injects the non-owning typed store before framework initialization.
@@ -182,7 +207,7 @@ public:
         }
 
       ResetLastError();
-      m_atr_handle=iATR(_Symbol,PERIOD_CURRENT,m_atr_period);
+      m_atr_handle=iATR(m_context.Symbol(),m_context.Timeframe(),m_atr_period);
       if(m_atr_handle==INVALID_HANDLE)
         {
          CLogger::Error(StringFormat("VolatilityAnalyzer could not create an ATR handle. Error: %d",
@@ -200,6 +225,7 @@ public:
      {
       if(!m_initialized)
          return;
+      m_update_count++;
 
       double atr=0.0;
       double score=0.0;
@@ -223,6 +249,7 @@ public:
          CLogger::Error("VolatilityAnalyzer could not store or verify its typed snapshot.");
          return;
         }
+      m_snapshot_count++;
 
       if(!m_consistency_verified)
         {
@@ -245,6 +272,26 @@ public:
 
       m_consistency_verified=false;
       CBaseEngine::Shutdown();
+     }
+
+   int               AtrHandle(void)
+     {
+      return(m_atr_handle);
+     }
+
+   long              UpdateCount(void)
+     {
+      return(m_update_count);
+     }
+
+   long              SnapshotCount(void)
+     {
+      return(m_snapshot_count);
+     }
+
+   SRuntimeContextId ContextId(void)
+     {
+      return(m_context.Id());
      }
 
    double            CalculateScore(const double current_atr,const double baseline_atr)

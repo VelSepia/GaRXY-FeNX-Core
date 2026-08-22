@@ -7,6 +7,7 @@
 #include "../Common/Constants.mqh"
 #include "../Common/CommonSnapshotStore.mqh"
 #include "../Common/Logger.mqh"
+#include "../Core/AnalysisContextBinding.mqh"
 #include "../Engine/BaseEngine.mqh"
 #include "EnvironmentSnapshot.mqh"
 
@@ -20,11 +21,14 @@ private:
    bool   m_valid_snapshot_logged;
    bool   m_consistency_logged;
    CCommonSnapshotStore *m_snapshot_store;
+   CAnalysisContextBinding m_context;
+   long   m_update_count;
+   long   m_snapshot_count;
 
    void ResetSnapshot(SEnvironmentSnapshot &snapshot)
      {
-      snapshot.symbol=_Symbol;
-      snapshot.timeframe=EnumToString(_Period);
+      snapshot.symbol=m_context.Symbol();
+      snapshot.timeframe=EnumToString(m_context.Timeframe());
       snapshot.snapshot_version=FENX_COMMON_ENVIRONMENT_SNAPSHOT_VERSION;
       snapshot.updated_at=TimeCurrent();
       snapshot.is_valid=false;
@@ -77,7 +81,7 @@ private:
    bool ReadText(const string key,string &value)
      {
       value="";
-      return(m_data_bus!=NULL && m_data_bus.TryGetText(key,value) &&
+      return(m_data_bus!=NULL && m_context.ReadEnvironmentLegacy(m_data_bus,key,value) &&
              StringLen(value)>0);
      }
 
@@ -215,7 +219,7 @@ private:
          AppendInvalidReason(snapshot.invalid_reason,
                              "Volatility source is missing or invalid");
 
-      const datetime current_closed_bar=iTime(_Symbol,_Period,1);
+      const datetime current_closed_bar=iTime(m_context.Symbol(),m_context.Timeframe(),1);
       snapshot.range_valid=
          (range_available && range_source_valid &&
           snapshot.range_upper>snapshot.range_lower &&
@@ -253,7 +257,7 @@ private:
                              "Market State source is missing or invalid");
 
       if(StringLen(snapshot.symbol)==0 || StringLen(snapshot.timeframe)==0 ||
-         PeriodSeconds(_Period)<=0)
+         PeriodSeconds(m_context.Timeframe())<=0)
          AppendInvalidReason(snapshot.invalid_reason,
                              "Snapshot symbol or timeframe identity is invalid");
 
@@ -314,7 +318,7 @@ private:
    bool StoreTypedSnapshot(const SEnvironmentSnapshot &snapshot)
      {
       if(m_snapshot_store==NULL ||
-         !m_snapshot_store.SetEnvironmentSnapshot(_Symbol,_Period,snapshot))
+         !m_snapshot_store.SetEnvironmentSnapshot(m_context.Symbol(),m_context.Timeframe(),snapshot))
          return(false);
 
       // A full typed/DataBus comparison is required only for the first
@@ -324,7 +328,7 @@ private:
          return(true);
 
       SEnvironmentSnapshot stored;
-      if(!m_snapshot_store.GetEnvironmentSnapshot(_Symbol,_Period,stored))
+      if(!m_snapshot_store.GetEnvironmentSnapshot(m_context.Symbol(),m_context.Timeframe(),stored))
          return(false);
       return(SameSnapshot(snapshot,stored));
      }
@@ -332,8 +336,8 @@ private:
    bool PublishField(const string field,const string value)
      {
       if(m_data_bus==NULL ||
-         !m_data_bus.SetSymbolText(FENX_DATABUS_NAMESPACE_COMMON_ENVIRONMENT,
-                                   _Symbol,field,value))
+         !m_context.PublishSymbolLegacy(m_data_bus,
+             FENX_DATABUS_NAMESPACE_COMMON_ENVIRONMENT,field,value))
          return(false);
 
       // Verify every serialized field on the first complete publication only.
@@ -341,8 +345,8 @@ private:
       if(!m_consistency_logged)
         {
          string stored="";
-         if(!m_data_bus.TryGetSymbolText(
-               FENX_DATABUS_NAMESPACE_COMMON_ENVIRONMENT,_Symbol,field,stored) ||
+         if(!m_context.ReadSymbolLegacy(m_data_bus,
+               FENX_DATABUS_NAMESPACE_COMMON_ENVIRONMENT,field,stored) ||
             stored!=value)
             return(false);
         }
@@ -351,7 +355,7 @@ private:
 
    bool PublishSnapshot(const SEnvironmentSnapshot &snapshot)
      {
-      const int digits=(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS);
+      const int digits=(int)SymbolInfoInteger(m_context.Symbol(),SYMBOL_DIGITS);
       bool success=true;
       if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_VALID,
                        (snapshot.is_valid ? "true" : "false"))) success=false;
@@ -430,6 +434,15 @@ public:
       m_valid_snapshot_logged=false;
       m_consistency_logged=false;
       m_snapshot_store=NULL;
+      m_update_count=0;
+      m_snapshot_count=0;
+     }
+
+   bool              SetRuntimeContext(const SRuntimeContextId &context_id,
+                                       const bool publish_primary_legacy)
+     {
+      return(!m_initialized &&
+             m_context.Configure(context_id,publish_primary_legacy));
      }
 
    //--- Injects the non-owning typed store before framework initialization.
@@ -467,6 +480,7 @@ public:
      {
       if(!m_initialized)
          return;
+      m_update_count++;
 
       SEnvironmentSnapshot snapshot;
       ResetSnapshot(snapshot);
@@ -476,6 +490,7 @@ public:
          CLogger::Error("EnvironmentEngine could not store or verify its typed snapshot.");
          return;
         }
+      m_snapshot_count++;
       if(!PublishSnapshot(snapshot))
         {
          CLogger::Error("EnvironmentEngine could not publish its shadow snapshot.");
@@ -512,6 +527,10 @@ public:
       m_consistency_logged=false;
       CBaseEngine::Shutdown();
      }
+
+   long              UpdateCount(void) { return(m_update_count); }
+   long              SnapshotCount(void) { return(m_snapshot_count); }
+   SRuntimeContextId ContextId(void) { return(m_context.Id()); }
   };
 
 #endif // FENX_ENVIRONMENT_ENGINE_MQH

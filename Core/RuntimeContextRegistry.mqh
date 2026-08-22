@@ -8,6 +8,14 @@
 #include "../Common/Logger.mqh"
 #include "../Common/Types.mqh"
 #include "../Config/ParameterManager.mqh"
+#include "../Common/CommonSnapshotStore.mqh"
+#include "../Environment/VolatilityAnalyzer.mqh"
+#include "../Environment/RangeDetector.mqh"
+#include "../Environment/TrendDetector.mqh"
+#include "../Environment/MarketStateIntegrator.mqh"
+#include "../Environment/EnvironmentEngine.mqh"
+#include "../MarketSelection/MarketSelectionEngine.mqh"
+#include "EngineManager.mqh"
 #include "StateManager.mqh"
 
 //--- Captures every fail-closed invariant that must be satisfied before a
@@ -46,8 +54,8 @@ void ResetRuntimeContextPreflight(SRuntimeContextPreflight &result)
    result.failure_reason="";
   }
 
-//--- Registry-owned runtime shell. Task026 intentionally owns no indicators or
-//--- engines here; it establishes only identity, availability, and local state.
+//--- Registry-owned runtime analysis context. Each context owns its local
+//--- state and exactly one instance of every Task027 analysis engine.
 class CRuntimeContext
   {
 private:
@@ -55,6 +63,13 @@ private:
    CStateManager         m_local_state;
    bool                  m_initialized;
    bool                  m_available;
+   bool                  m_analysis_prepared;
+   CVolatilityAnalyzer   m_volatility;
+   CRangeDetector        m_range;
+   CTrendDetector        m_trend;
+   CMarketStateIntegrator m_market_state;
+   CEnvironmentEngine    m_environment;
+   CMarketSelectionEngine m_market_selection;
 
 public:
                      CRuntimeContext(void)
@@ -63,6 +78,7 @@ public:
       m_local_state.Reset();
       m_initialized=false;
       m_available=false;
+      m_analysis_prepared=false;
      }
 
    bool              Configure(const SRuntimeContextConfig &config,
@@ -75,8 +91,53 @@ public:
       m_config=config;
       m_available=(config.enabled && available);
       m_initialized=m_available;
+      m_analysis_prepared=false;
       m_local_state.Reset();
       return(true);
+     }
+
+   //--- The runtime context is the sole owner of all six analysis instances.
+   //--- EngineManager receives non-owning references only after configuration.
+   bool              PrepareAnalysis(CCommonSnapshotStore &snapshot_store,
+                                     const bool publish_primary_legacy)
+     {
+      if(!m_available)
+         return(true);
+      if(m_analysis_prepared)
+         return(true);
+
+      const SRuntimeContextId context_id=m_config.id;
+      if(!m_volatility.SetRuntimeContext(context_id,publish_primary_legacy) ||
+         !m_range.SetRuntimeContext(context_id,publish_primary_legacy) ||
+         !m_trend.SetRuntimeContext(context_id,publish_primary_legacy) ||
+         !m_market_state.SetRuntimeContext(context_id,publish_primary_legacy) ||
+         !m_environment.SetRuntimeContext(context_id,publish_primary_legacy) ||
+         !m_market_selection.SetRuntimeContext(context_id,publish_primary_legacy) ||
+         !m_volatility.SetSnapshotStore(snapshot_store) ||
+         !m_range.SetSnapshotStore(snapshot_store) ||
+         !m_trend.SetSnapshotStore(snapshot_store) ||
+         !m_market_state.SetSnapshotStore(snapshot_store) ||
+         !m_environment.SetSnapshotStore(snapshot_store))
+         return(false);
+
+      m_analysis_prepared=true;
+      return(true);
+     }
+
+   //--- Registration order is the formal per-context pipeline order. All six
+   //--- retain RUNMODE_TICK to preserve Task022/Task026 primary telemetry.
+   bool              RegisterAnalysis(CEngineManager &manager)
+     {
+      if(!m_available)
+         return(true);
+      if(!m_analysis_prepared)
+         return(false);
+      return(manager.Register(m_volatility,m_config.id,m_local_state,RUNMODE_TICK) &&
+             manager.Register(m_range,m_config.id,m_local_state,RUNMODE_TICK) &&
+             manager.Register(m_trend,m_config.id,m_local_state,RUNMODE_TICK) &&
+             manager.Register(m_market_state,m_config.id,m_local_state,RUNMODE_TICK) &&
+             manager.Register(m_environment,m_config.id,m_local_state,RUNMODE_TICK) &&
+             manager.Register(m_market_selection,m_config.id,m_local_state,RUNMODE_TICK));
      }
 
    SRuntimeContextConfig Config(void)
@@ -103,6 +164,32 @@ public:
      {
       return(m_available);
      }
+
+   bool              IsAnalysisPrepared(void)
+     {
+      return(m_analysis_prepared);
+     }
+
+   int               AnalysisEngineCount(void)
+     {
+      return(m_analysis_prepared ? FENX_ANALYSIS_ENGINES_PER_CONTEXT : 0);
+     }
+
+   int               IndicatorHandleCount(void)
+     {
+      int count=0;
+      if(m_volatility.AtrHandle()!=INVALID_HANDLE) count++;
+      if(m_trend.MaHandle()!=INVALID_HANDLE) count++;
+      if(m_trend.AdxHandle()!=INVALID_HANDLE) count++;
+      return(count);
+     }
+
+   CVolatilityAnalyzer *Volatility(void) { return(GetPointer(m_volatility)); }
+   CRangeDetector *Range(void) { return(GetPointer(m_range)); }
+   CTrendDetector *Trend(void) { return(GetPointer(m_trend)); }
+   CMarketStateIntegrator *MarketState(void) { return(GetPointer(m_market_state)); }
+   CEnvironmentEngine *Environment(void) { return(GetPointer(m_environment)); }
+   CMarketSelectionEngine *MarketSelection(void) { return(GetPointer(m_market_selection)); }
   };
 
 //--- Owns runtime context shells. EngineManager only receives non-owning
@@ -113,6 +200,8 @@ private:
    CRuntimeContext m_contexts[];
    int             m_primary_index;
    bool            m_initialized;
+   bool            m_analysis_prepared;
+   bool            m_analysis_registered;
 
    bool              BrokerContextAvailable(const SRuntimeContextConfig &config)
      {
@@ -133,6 +222,8 @@ public:
      {
       m_primary_index=-1;
       m_initialized=false;
+      m_analysis_prepared=false;
+      m_analysis_registered=false;
      }
 
    //--- Pure preflight: identity/policy validation is kept separate from
@@ -243,6 +334,40 @@ public:
       return(true);
      }
 
+   //--- Configures owned analysis instances after identity/availability
+   //--- validation and before non-owning registration into EngineManager.
+   bool              PrepareAnalysis(CCommonSnapshotStore &snapshot_store)
+     {
+      if(!m_initialized)
+         return(false);
+      if(m_analysis_prepared)
+         return(true);
+
+      for(int index=0;index<ArraySize(m_contexts);index++)
+        {
+         const bool is_primary=(index==m_primary_index);
+         if(!m_contexts[index].PrepareAnalysis(snapshot_store,is_primary))
+            return(false);
+        }
+      m_analysis_prepared=true;
+      return(true);
+     }
+
+   //--- Registers complete context pipelines in context order. The caller must
+   //--- invoke this before global portfolio/downstream engines are registered.
+   bool              RegisterAnalysis(CEngineManager &manager)
+     {
+      if(!m_analysis_prepared || m_analysis_registered)
+         return(false);
+      for(int index=0;index<ArraySize(m_contexts);index++)
+        {
+         if(!m_contexts[index].RegisterAnalysis(manager))
+            return(false);
+        }
+      m_analysis_registered=true;
+      return(true);
+     }
+
    //--- Production path. Broker discovery and selection are isolated here;
    //--- required failures stop initialization while optional failures remain
    //--- represented as unavailable contexts.
@@ -308,6 +433,8 @@ public:
       ArrayResize(m_contexts,0);
       m_primary_index=-1;
       m_initialized=false;
+      m_analysis_prepared=false;
+      m_analysis_registered=false;
      }
 
    int               Count(void)
@@ -352,6 +479,33 @@ public:
    bool              IsInitialized(void)
      {
       return(m_initialized);
+     }
+
+   bool              IsAnalysisPrepared(void) { return(m_analysis_prepared); }
+   bool              IsAnalysisRegistered(void) { return(m_analysis_registered); }
+
+   int               AvailableContextCount(void)
+     {
+      int count=0;
+      for(int index=0;index<ArraySize(m_contexts);index++)
+         if(m_contexts[index].IsAvailable()) count++;
+      return(count);
+     }
+
+   int               AnalysisEngineCount(void)
+     {
+      int count=0;
+      for(int index=0;index<ArraySize(m_contexts);index++)
+         count+=m_contexts[index].AnalysisEngineCount();
+      return(count);
+     }
+
+   int               IndicatorHandleCount(void)
+     {
+      int count=0;
+      for(int index=0;index<ArraySize(m_contexts);index++)
+         count+=m_contexts[index].IndicatorHandleCount();
+      return(count);
      }
   };
 

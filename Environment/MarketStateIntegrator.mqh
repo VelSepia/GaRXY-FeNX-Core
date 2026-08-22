@@ -7,6 +7,7 @@
 #include "../Common/Constants.mqh"
 #include "../Common/Logger.mqh"
 #include "../Common/CommonSnapshotStore.mqh"
+#include "../Core/AnalysisContextBinding.mqh"
 #include "../Engine/BaseEngine.mqh"
 
 //--- Combines published environment facts into one non-trading market-state description.
@@ -21,6 +22,9 @@ private:
    int    m_freshness_limit_seconds;
    bool   m_consistency_verified;
    CCommonSnapshotStore *m_snapshot_store;
+   CAnalysisContextBinding m_context;
+   long   m_update_count;
+   long   m_snapshot_count;
 
    void ResetSnapshot(SMarketStateSnapshot &snapshot)
      {
@@ -66,7 +70,7 @@ private:
          return(false);
 
       string text="";
-      if(!m_data_bus.TryGetText(key,text) || StringLen(text)==0)
+      if(!m_context.ReadEnvironmentLegacy(m_data_bus,key,text) || StringLen(text)==0)
          return(false);
 
       value=StringToDouble(text);
@@ -79,7 +83,7 @@ private:
          return(false);
 
       string text="";
-      if(!m_data_bus.TryGetText(key,text))
+      if(!m_context.ReadEnvironmentLegacy(m_data_bus,key,text))
          return(false);
       if(text=="true" || text=="TRUE")
         {
@@ -97,7 +101,7 @@ private:
 
    bool ReadText(const string key,string &value)
      {
-      if(m_data_bus==NULL || !m_data_bus.TryGetText(key,value))
+      if(m_data_bus==NULL || !m_context.ReadEnvironmentLegacy(m_data_bus,key,value))
          return(false);
       return(StringLen(value)>0);
      }
@@ -189,20 +193,25 @@ private:
          return(false);
 
       bool success=true;
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_MARKET_STATE,
-                             snapshot.market_state))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,
+             "State",FENX_DATABUS_KEY_ENVIRONMENT_MARKET_STATE,
+             snapshot.market_state))
          success=false;
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_MARKET_CONFIDENCE,
-                             DoubleToString(snapshot.confidence,2)))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,
+             "Confidence",FENX_DATABUS_KEY_ENVIRONMENT_MARKET_CONFIDENCE,
+             DoubleToString(snapshot.confidence,2)))
          success=false;
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_RECOMMENDED_STYLE,
-                             snapshot.recommended_trading_style))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,
+             "RecommendedTradingStyle",FENX_DATABUS_KEY_ENVIRONMENT_RECOMMENDED_STYLE,
+             snapshot.recommended_trading_style))
          success=false;
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_RECOMMENDED_RISK,
-                             snapshot.recommended_risk_level))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,
+             "RecommendedRiskLevel",FENX_DATABUS_KEY_ENVIRONMENT_RECOMMENDED_RISK,
+             snapshot.recommended_risk_level))
          success=false;
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_MARKET_UPDATED_AT,
-                             TimeToString(snapshot.updated_at,TIME_DATE|TIME_SECONDS)))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,
+             "UpdatedAt",FENX_DATABUS_KEY_ENVIRONMENT_MARKET_UPDATED_AT,
+             TimeToString(snapshot.updated_at,TIME_DATE|TIME_SECONDS)))
          success=false;
 
       return(success);
@@ -216,8 +225,8 @@ private:
                            const double trend_score,const double trend_strength,
                            const double volatility_score,const double atr)
      {
-      snapshot.symbol=_Symbol;
-      snapshot.timeframe=EnumToString(_Period);
+      snapshot.symbol=m_context.Symbol();
+      snapshot.timeframe=EnumToString(m_context.Timeframe());
       snapshot.snapshot_version=FENX_COMMON_MARKET_STATE_SNAPSHOT_VERSION;
       snapshot.is_valid=false;
       snapshot.is_fresh=false;
@@ -313,23 +322,23 @@ private:
    bool StoreTypedSnapshot(const SMarketStateSnapshot &snapshot)
      {
       if(m_snapshot_store==NULL ||
-         !m_snapshot_store.SetMarketStateSnapshot(_Symbol,_Period,snapshot))
+         !m_snapshot_store.SetMarketStateSnapshot(m_context.Symbol(),m_context.Timeframe(),snapshot))
          return(false);
       if(m_consistency_verified)
          return(true);
 
       SMarketStateSnapshot stored;
-      if(!m_snapshot_store.GetMarketStateSnapshot(_Symbol,_Period,stored) ||
+      if(!m_snapshot_store.GetMarketStateSnapshot(m_context.Symbol(),m_context.Timeframe(),stored) ||
          !SameTypedSnapshot(snapshot,stored))
          return(false);
 
       string state="",confidence="",style="",risk="",updated="";
       if(m_data_bus==NULL ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_MARKET_STATE,state) ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_MARKET_CONFIDENCE,confidence) ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_RECOMMENDED_STYLE,style) ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_RECOMMENDED_RISK,risk) ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_MARKET_UPDATED_AT,updated))
+         !m_context.ReadEnvironmentLegacy(m_data_bus,FENX_DATABUS_KEY_ENVIRONMENT_MARKET_STATE,state) ||
+         !m_context.ReadEnvironmentLegacy(m_data_bus,FENX_DATABUS_KEY_ENVIRONMENT_MARKET_CONFIDENCE,confidence) ||
+         !m_context.ReadEnvironmentLegacy(m_data_bus,FENX_DATABUS_KEY_ENVIRONMENT_RECOMMENDED_STYLE,style) ||
+         !m_context.ReadEnvironmentLegacy(m_data_bus,FENX_DATABUS_KEY_ENVIRONMENT_RECOMMENDED_RISK,risk) ||
+         !m_context.ReadEnvironmentLegacy(m_data_bus,FENX_DATABUS_KEY_ENVIRONMENT_MARKET_UPDATED_AT,updated))
          return(false);
 
       return(state==snapshot.market_state &&
@@ -351,6 +360,15 @@ public:
       m_freshness_limit_seconds=0;
       m_consistency_verified=false;
       m_snapshot_store=NULL;
+      m_update_count=0;
+      m_snapshot_count=0;
+     }
+
+   bool              SetRuntimeContext(const SRuntimeContextId &context_id,
+                                       const bool publish_primary_legacy)
+     {
+      return(!m_initialized &&
+             m_context.Configure(context_id,publish_primary_legacy));
      }
 
    //--- Injects the non-owning typed store before framework initialization.
@@ -400,6 +418,7 @@ public:
      {
       if(!m_initialized)
          return;
+      m_update_count++;
 
       SMarketStateSnapshot snapshot;
       ResetSnapshot(snapshot);
@@ -431,6 +450,7 @@ public:
          CLogger::Error("MarketStateIntegrator could not store or verify its typed snapshot.");
          return;
         }
+      m_snapshot_count++;
       if(!m_consistency_verified)
         {
          CLogger::Info(StringFormat(
@@ -447,6 +467,10 @@ public:
       m_consistency_verified=false;
       CBaseEngine::Shutdown();
      }
+
+   long              UpdateCount(void) { return(m_update_count); }
+   long              SnapshotCount(void) { return(m_snapshot_count); }
+   SRuntimeContextId ContextId(void) { return(m_context.Id()); }
   };
 
 #endif // FENX_ENVIRONMENT_MARKET_STATE_INTEGRATOR_MQH

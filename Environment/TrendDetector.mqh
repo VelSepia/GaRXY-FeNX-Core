@@ -7,6 +7,7 @@
 #include "../Common/Constants.mqh"
 #include "../Common/Logger.mqh"
 #include "../Common/CommonSnapshotStore.mqh"
+#include "../Core/AnalysisContextBinding.mqh"
 #include "../Engine/BaseEngine.mqh"
 
 //--- Detects directional market facts from completed bars without making decisions.
@@ -29,6 +30,9 @@ private:
    int    m_freshness_limit_seconds;
    bool   m_consistency_verified;
    CCommonSnapshotStore *m_snapshot_store;
+   CAnalysisContextBinding m_context;
+   long   m_update_count;
+   long   m_snapshot_count;
 
    void ResetSnapshot(STrendSnapshot &snapshot)
      {
@@ -63,7 +67,9 @@ private:
          return(false);
 
       string atr_text="";
-      if(!m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_ATR,atr_text))
+      if(!m_context.ReadGlobalLegacy(m_data_bus,
+            FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"ATR",
+            FENX_DATABUS_KEY_ENVIRONMENT_ATR,atr_text))
          return(false);
 
       atr=StringToDouble(atr_text);
@@ -190,7 +196,7 @@ private:
       if(bar_count!=m_lookback_bars || atr<=0.0)
          return(false);
 
-      const double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
+      const double point=SymbolInfoDouble(m_context.Symbol(),SYMBOL_POINT);
       if(point<=0.0)
          return(false);
 
@@ -256,32 +262,41 @@ private:
          return(false);
 
       bool success=true;
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_TREND_DIRECTION,
-                             snapshot.direction))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
+             "Direction",FENX_DATABUS_KEY_ENVIRONMENT_TREND_DIRECTION,
+             snapshot.direction))
          success=false;
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_TREND_STRENGTH,
-                             DoubleToString(snapshot.strength,2)))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
+             "Strength",FENX_DATABUS_KEY_ENVIRONMENT_TREND_STRENGTH,
+             DoubleToString(snapshot.strength,2)))
          success=false;
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_TREND_SCORE,
-                             DoubleToString(snapshot.score,2)))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
+             "Score",FENX_DATABUS_KEY_ENVIRONMENT_TREND_SCORE,
+             DoubleToString(snapshot.score,2)))
          success=false;
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_TREND_SLOPE,
-                             DoubleToString(snapshot.slope_points,4)))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
+             "Slope",FENX_DATABUS_KEY_ENVIRONMENT_TREND_SLOPE,
+             DoubleToString(snapshot.slope_points,4)))
          success=false;
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_TREND_CONFIDENCE,
-                             DoubleToString(snapshot.confidence,2)))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
+             "Confidence",FENX_DATABUS_KEY_ENVIRONMENT_TREND_CONFIDENCE,
+             DoubleToString(snapshot.confidence,2)))
          success=false;
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_TREND_ADX,
-                             DoubleToString(snapshot.adx,2)))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
+             "ADX",FENX_DATABUS_KEY_ENVIRONMENT_TREND_ADX,
+             DoubleToString(snapshot.adx,2)))
          success=false;
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_IS_TREND,
-                             (snapshot.is_trend ? "true" : "false")))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
+             "IsTrend",FENX_DATABUS_KEY_ENVIRONMENT_IS_TREND,
+             (snapshot.is_trend ? "true" : "false")))
          success=false;
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_TREND_DATA_VALID,
-                             (snapshot.is_data_valid ? "true" : "false")))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
+             "IsDataValid",FENX_DATABUS_KEY_ENVIRONMENT_TREND_DATA_VALID,
+             (snapshot.is_data_valid ? "true" : "false")))
          success=false;
-      if(!m_data_bus.SetText(FENX_DATABUS_KEY_ENVIRONMENT_TREND_UPDATED_AT,
-                             TimeToString(snapshot.updated_at,TIME_DATE|TIME_SECONDS)))
+      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
+             "UpdatedAt",FENX_DATABUS_KEY_ENVIRONMENT_TREND_UPDATED_AT,
+             TimeToString(snapshot.updated_at,TIME_DATE|TIME_SECONDS)))
          success=false;
 
       return(success);
@@ -293,8 +308,8 @@ private:
    void BuildTypedSnapshot(STrendSnapshot &snapshot,
                            const datetime source_bar_time)
      {
-      snapshot.symbol=_Symbol;
-      snapshot.timeframe=EnumToString(_Period);
+      snapshot.symbol=m_context.Symbol();
+      snapshot.timeframe=EnumToString(m_context.Timeframe());
       snapshot.snapshot_version=FENX_COMMON_TREND_SNAPSHOT_VERSION;
       snapshot.is_valid=false;
       snapshot.is_fresh=false;
@@ -345,28 +360,28 @@ private:
    bool StoreTypedSnapshot(const STrendSnapshot &snapshot)
      {
       if(m_snapshot_store==NULL ||
-         !m_snapshot_store.SetTrendSnapshot(_Symbol,_Period,snapshot))
+         !m_snapshot_store.SetTrendSnapshot(m_context.Symbol(),m_context.Timeframe(),snapshot))
          return(false);
       if(m_consistency_verified)
          return(true);
 
       STrendSnapshot stored;
-      if(!m_snapshot_store.GetTrendSnapshot(_Symbol,_Period,stored) ||
+      if(!m_snapshot_store.GetTrendSnapshot(m_context.Symbol(),m_context.Timeframe(),stored) ||
          !SameTypedSnapshot(snapshot,stored))
          return(false);
 
       string direction="",strength="",score="",slope="",confidence="";
       string adx="",is_trend="",is_valid="",updated="";
       if(m_data_bus==NULL ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_TREND_DIRECTION,direction) ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_TREND_STRENGTH,strength) ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_TREND_SCORE,score) ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_TREND_SLOPE,slope) ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_TREND_CONFIDENCE,confidence) ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_TREND_ADX,adx) ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_IS_TREND,is_trend) ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_TREND_DATA_VALID,is_valid) ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_TREND_UPDATED_AT,updated))
+         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Direction",FENX_DATABUS_KEY_ENVIRONMENT_TREND_DIRECTION,direction) ||
+         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Strength",FENX_DATABUS_KEY_ENVIRONMENT_TREND_STRENGTH,strength) ||
+         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Score",FENX_DATABUS_KEY_ENVIRONMENT_TREND_SCORE,score) ||
+         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Slope",FENX_DATABUS_KEY_ENVIRONMENT_TREND_SLOPE,slope) ||
+         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Confidence",FENX_DATABUS_KEY_ENVIRONMENT_TREND_CONFIDENCE,confidence) ||
+         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"ADX",FENX_DATABUS_KEY_ENVIRONMENT_TREND_ADX,adx) ||
+         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"IsTrend",FENX_DATABUS_KEY_ENVIRONMENT_IS_TREND,is_trend) ||
+         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"IsDataValid",FENX_DATABUS_KEY_ENVIRONMENT_TREND_DATA_VALID,is_valid) ||
+         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"UpdatedAt",FENX_DATABUS_KEY_ENVIRONMENT_TREND_UPDATED_AT,updated))
          return(false);
 
       return(direction==snapshot.direction &&
@@ -400,6 +415,15 @@ public:
       m_freshness_limit_seconds=0;
       m_consistency_verified=false;
       m_snapshot_store=NULL;
+      m_update_count=0;
+      m_snapshot_count=0;
+     }
+
+   bool              SetRuntimeContext(const SRuntimeContextId &context_id,
+                                       const bool publish_primary_legacy)
+     {
+      return(!m_initialized &&
+             m_context.Configure(context_id,publish_primary_legacy));
      }
 
    //--- Injects the non-owning typed store before framework initialization.
@@ -449,8 +473,9 @@ public:
         }
 
       ResetLastError();
-      m_ma_handle=iMA(_Symbol,PERIOD_CURRENT,m_ma_period,0,MODE_EMA,PRICE_CLOSE);
-      m_adx_handle=iADX(_Symbol,PERIOD_CURRENT,m_adx_period);
+      m_ma_handle=iMA(m_context.Symbol(),m_context.Timeframe(),m_ma_period,0,
+                      MODE_EMA,PRICE_CLOSE);
+      m_adx_handle=iADX(m_context.Symbol(),m_context.Timeframe(),m_adx_period);
       if(m_ma_handle==INVALID_HANDLE || m_adx_handle==INVALID_HANDLE)
         {
          CLogger::Error(StringFormat("TrendDetector could not create indicator handles. Error: %d",
@@ -468,6 +493,7 @@ public:
      {
       if(!m_initialized)
          return;
+      m_update_count++;
 
       STrendSnapshot snapshot;
       ResetSnapshot(snapshot);
@@ -479,7 +505,8 @@ public:
       double minus_di=0.0;
       MqlRates rates[];
       // start_pos=1 excludes the current forming candle; the copied array is oldest to newest.
-      const int copied=CopyRates(_Symbol,PERIOD_CURRENT,1,m_lookback_bars,rates);
+      const int copied=CopyRates(m_context.Symbol(),m_context.Timeframe(),1,
+                                 m_lookback_bars,rates);
       if(!ReadAtrFromDataBus(atr) || copied!=m_lookback_bars ||
          !ReadClosedIndicators(ma_first,ma_last,adx,plus_di,minus_di) ||
          !BuildSnapshot(rates,copied,atr,ma_first,ma_last,adx,plus_di,minus_di,snapshot))
@@ -501,6 +528,7 @@ public:
          CLogger::Error("TrendDetector could not store or verify its typed snapshot.");
          return;
         }
+      m_snapshot_count++;
       if(!m_consistency_verified)
         {
          CLogger::Info(StringFormat(
@@ -528,6 +556,12 @@ public:
       m_consistency_verified=false;
       CBaseEngine::Shutdown();
      }
+
+   int               MaHandle(void) { return(m_ma_handle); }
+   int               AdxHandle(void) { return(m_adx_handle); }
+   long              UpdateCount(void) { return(m_update_count); }
+   long              SnapshotCount(void) { return(m_snapshot_count); }
+   SRuntimeContextId ContextId(void) { return(m_context.Id()); }
   };
 
 #endif // FENX_ENVIRONMENT_TREND_DETECTOR_MQH

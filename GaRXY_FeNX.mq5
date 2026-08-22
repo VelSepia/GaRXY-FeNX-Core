@@ -56,12 +56,6 @@ input string InpExecutionTradeComment               = "GaRXY_FeNX_Core_v1";
 CParameterManager g_parameters;
 CCoreController   g_controller;
 CCommonSnapshotStore g_common_snapshot_store;
-CVolatilityAnalyzer g_volatility_analyzer;
-CRangeDetector      g_range_detector;
-CTrendDetector      g_trend_detector;
-CMarketStateIntegrator g_market_state_integrator;
-CEnvironmentEngine     g_environment_engine;
-CMarketSelectionEngine g_market_selection_engine;
 CPairRankingEngine     g_pair_ranking_engine;
 CCapitalAllocationEngine g_capital_allocation_engine;
 CTradingStyleEngine      g_trading_style_engine;
@@ -120,29 +114,10 @@ int OnInit()
       return(INIT_FAILED);
      }
 
-   if(!g_volatility_analyzer.SetSnapshotStore(g_common_snapshot_store))
+   if(!g_controller.PrepareRuntimeContexts(g_parameters,
+                                           g_common_snapshot_store,true))
      {
-      CLogger::Error("Unable to attach CommonSnapshotStore to VolatilityAnalyzer.");
-      return(INIT_FAILED);
-     }
-   if(!g_range_detector.SetSnapshotStore(g_common_snapshot_store))
-     {
-      CLogger::Error("Unable to attach CommonSnapshotStore to RangeDetector.");
-      return(INIT_FAILED);
-     }
-   if(!g_trend_detector.SetSnapshotStore(g_common_snapshot_store))
-     {
-      CLogger::Error("Unable to attach CommonSnapshotStore to TrendDetector.");
-      return(INIT_FAILED);
-     }
-   if(!g_market_state_integrator.SetSnapshotStore(g_common_snapshot_store))
-     {
-      CLogger::Error("Unable to attach CommonSnapshotStore to MarketStateIntegrator.");
-      return(INIT_FAILED);
-     }
-   if(!g_environment_engine.SetSnapshotStore(g_common_snapshot_store))
-     {
-      CLogger::Error("Unable to attach CommonSnapshotStore to EnvironmentEngine.");
+      CLogger::Error("Unable to prepare runtime context analysis pipelines.");
       return(INIT_FAILED);
      }
    if(!g_standby_engine.SetSnapshotStore(g_common_snapshot_store))
@@ -181,39 +156,9 @@ int OnInit()
       return(INIT_FAILED);
      }
 
-   if(!g_controller.RegisterEngine(g_volatility_analyzer))
+   if(!g_controller.RegisterRuntimeContextAnalysisEngines())
      {
-      CLogger::Error("Unable to register VolatilityAnalyzer.");
-      return(INIT_FAILED);
-     }
-
-   if(!g_controller.RegisterEngine(g_range_detector))
-     {
-      CLogger::Error("Unable to register RangeDetector.");
-      return(INIT_FAILED);
-     }
-
-   if(!g_controller.RegisterEngine(g_trend_detector))
-     {
-      CLogger::Error("Unable to register TrendDetector.");
-      return(INIT_FAILED);
-     }
-
-   if(!g_controller.RegisterEngine(g_market_state_integrator))
-     {
-      CLogger::Error("Unable to register MarketStateIntegrator.");
-      return(INIT_FAILED);
-     }
-
-   if(!g_controller.RegisterEngine(g_environment_engine))
-     {
-      CLogger::Error("Unable to register EnvironmentEngine.");
-      return(INIT_FAILED);
-     }
-
-   if(!g_controller.RegisterEngine(g_market_selection_engine))
-     {
-      CLogger::Error("Unable to register MarketSelectionEngine.");
+      CLogger::Error("Unable to register runtime context analysis pipelines.");
       return(INIT_FAILED);
      }
 

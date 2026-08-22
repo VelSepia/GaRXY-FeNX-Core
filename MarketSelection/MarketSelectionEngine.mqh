@@ -6,6 +6,7 @@
 
 #include "../Common/Constants.mqh"
 #include "../Common/Logger.mqh"
+#include "../Core/AnalysisContextBinding.mqh"
 #include "../Engine/BaseEngine.mqh"
 
 //--- Immutable environment facts read from CDataBus for one update cycle.
@@ -48,6 +49,9 @@ private:
    double m_max_volatility_score;
    double m_min_selection_score;
    double m_transition_penalty;
+   CAnalysisContextBinding m_context;
+   long   m_update_count;
+   long   m_snapshot_count;
 
    void ResetSnapshot(SMarketSelectionSnapshot &snapshot,const string symbol)
      {
@@ -72,7 +76,8 @@ private:
          return(false);
 
       string text="";
-      if(!m_data_bus.TryGetText(key,text) || StringLen(text)==0)
+      if(!m_context.ReadEnvironmentLegacy(m_data_bus,key,text) ||
+         StringLen(text)==0)
          return(false);
 
       value=StringToDouble(text);
@@ -85,7 +90,7 @@ private:
          return(false);
 
       string text="";
-      if(!m_data_bus.TryGetText(key,text))
+      if(!m_context.ReadEnvironmentLegacy(m_data_bus,key,text))
          return(false);
 
       if(text=="true" || text=="TRUE")
@@ -120,8 +125,9 @@ private:
                       environment.range_data_valid) ||
          !ReadBoolean(FENX_DATABUS_KEY_ENVIRONMENT_TREND_DATA_VALID,
                       environment.trend_data_valid) ||
-         !m_data_bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_MARKET_STATE,
-                                environment.market_state))
+         !m_context.ReadEnvironmentLegacy(m_data_bus,
+             FENX_DATABUS_KEY_ENVIRONMENT_MARKET_STATE,
+             environment.market_state))
          return(false);
 
       if(environment.atr<=0.0 || environment.volatility_score<0.0 ||
@@ -170,7 +176,7 @@ private:
          return(false);
         }
 
-      const int bar_count=Bars(symbol,PERIOD_CURRENT);
+      const int bar_count=Bars(symbol,m_context.Timeframe());
       if(bar_count<m_min_history_bars)
         {
          reason=StringFormat("Insufficient history: %d of %d bars.",bar_count,m_min_history_bars);
@@ -263,7 +269,8 @@ private:
       if(environment.market_state=="TRANSITION")
          snapshot.score=ClampScore(snapshot.score*(1.0-(m_transition_penalty/100.0)));
 
-      const double history_confidence=ClampScore(100.0*(double)Bars(snapshot.symbol,PERIOD_CURRENT)/
+      const double history_confidence=ClampScore(100.0*(double)Bars(
+                                                 snapshot.symbol,m_context.Timeframe())/
                                                  (2.0*m_min_history_bars));
       snapshot.confidence=ClampScore((0.50*environment.market_confidence)+
                                      (0.25*history_confidence)+(0.25*snapshot.score));
@@ -283,36 +290,44 @@ private:
          return(false);
 
       bool success=true;
-      if(!m_data_bus.SetSymbolText(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,snapshot.symbol,
-                                   FENX_DATABUS_FIELD_MARKET_SELECTION_SYMBOL,snapshot.symbol))
+      if(!m_context.PublishSymbolLegacyFor(m_data_bus,
+             FENX_DATABUS_NAMESPACE_MARKET_SELECTION,snapshot.symbol,
+             FENX_DATABUS_FIELD_MARKET_SELECTION_SYMBOL,snapshot.symbol))
          success=false;
-      if(!m_data_bus.SetSymbolText(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,snapshot.symbol,
-                                   FENX_DATABUS_FIELD_MARKET_SELECTION_IS_ELIGIBLE,
-                                   (snapshot.is_eligible ? "true" : "false")))
+      if(!m_context.PublishSymbolLegacyFor(m_data_bus,
+             FENX_DATABUS_NAMESPACE_MARKET_SELECTION,snapshot.symbol,
+             FENX_DATABUS_FIELD_MARKET_SELECTION_IS_ELIGIBLE,
+             (snapshot.is_eligible ? "true" : "false")))
          success=false;
-      if(!m_data_bus.SetSymbolText(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,snapshot.symbol,
-                                   FENX_DATABUS_FIELD_MARKET_SELECTION_SCORE,
-                                   DoubleToString(snapshot.score,2)))
+      if(!m_context.PublishSymbolLegacyFor(m_data_bus,
+             FENX_DATABUS_NAMESPACE_MARKET_SELECTION,snapshot.symbol,
+             FENX_DATABUS_FIELD_MARKET_SELECTION_SCORE,
+             DoubleToString(snapshot.score,2)))
          success=false;
-      if(!m_data_bus.SetSymbolText(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,snapshot.symbol,
-                                   FENX_DATABUS_FIELD_MARKET_SELECTION_CONFIDENCE,
-                                   DoubleToString(snapshot.confidence,2)))
+      if(!m_context.PublishSymbolLegacyFor(m_data_bus,
+             FENX_DATABUS_NAMESPACE_MARKET_SELECTION,snapshot.symbol,
+             FENX_DATABUS_FIELD_MARKET_SELECTION_CONFIDENCE,
+             DoubleToString(snapshot.confidence,2)))
          success=false;
-      if(!m_data_bus.SetSymbolText(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,snapshot.symbol,
-                                   FENX_DATABUS_FIELD_MARKET_SELECTION_SPREAD_POINTS,
-                                   DoubleToString(snapshot.spread_points,2)))
+      if(!m_context.PublishSymbolLegacyFor(m_data_bus,
+             FENX_DATABUS_NAMESPACE_MARKET_SELECTION,snapshot.symbol,
+             FENX_DATABUS_FIELD_MARKET_SELECTION_SPREAD_POINTS,
+             DoubleToString(snapshot.spread_points,2)))
          success=false;
-      if(!m_data_bus.SetSymbolText(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,snapshot.symbol,
-                                   FENX_DATABUS_FIELD_MARKET_SELECTION_SPREAD_ATR,
-                                   DoubleToString(snapshot.spread_to_atr_ratio,4)))
+      if(!m_context.PublishSymbolLegacyFor(m_data_bus,
+             FENX_DATABUS_NAMESPACE_MARKET_SELECTION,snapshot.symbol,
+             FENX_DATABUS_FIELD_MARKET_SELECTION_SPREAD_ATR,
+             DoubleToString(snapshot.spread_to_atr_ratio,4)))
          success=false;
-      if(!m_data_bus.SetSymbolText(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,snapshot.symbol,
-                                   FENX_DATABUS_FIELD_MARKET_SELECTION_REJECTION,
-                                   snapshot.rejection_reason))
+      if(!m_context.PublishSymbolLegacyFor(m_data_bus,
+             FENX_DATABUS_NAMESPACE_MARKET_SELECTION,snapshot.symbol,
+             FENX_DATABUS_FIELD_MARKET_SELECTION_REJECTION,
+             snapshot.rejection_reason))
          success=false;
-      if(!m_data_bus.SetSymbolText(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,snapshot.symbol,
-                                   FENX_DATABUS_FIELD_MARKET_SELECTION_UPDATED_AT,
-                                   TimeToString(snapshot.updated_at,TIME_DATE|TIME_SECONDS)))
+      if(!m_context.PublishSymbolLegacyFor(m_data_bus,
+             FENX_DATABUS_NAMESPACE_MARKET_SELECTION,snapshot.symbol,
+             FENX_DATABUS_FIELD_MARKET_SELECTION_UPDATED_AT,
+             TimeToString(snapshot.updated_at,TIME_DATE|TIME_SECONDS)))
          success=false;
 
       return(success);
@@ -320,6 +335,14 @@ private:
 
    bool LoadSymbols(CParameterManager &parameters)
      {
+      if(m_context.IsConfigured())
+        {
+         if(ArrayResize(m_symbols,1)!=1)
+            return(false);
+         m_symbols[0]=m_context.Symbol();
+         return(true);
+        }
+
       const int symbol_count=parameters.MarketSelectionSymbolCount();
       if(symbol_count<1 || symbol_count>FENX_MARKET_SELECTION_MAX_SYMBOLS ||
          ArrayResize(m_symbols,symbol_count)!=symbol_count)
@@ -345,6 +368,15 @@ public:
       m_max_volatility_score=0.0;
       m_min_selection_score=0.0;
       m_transition_penalty=0.0;
+      m_update_count=0;
+      m_snapshot_count=0;
+     }
+
+   bool              SetRuntimeContext(const SRuntimeContextId &context_id,
+                                       const bool publish_primary_legacy)
+     {
+      return(!m_initialized &&
+             m_context.Configure(context_id,publish_primary_legacy));
      }
 
    virtual bool       Initialize(CDataBus &data_bus,CParameterManager &parameters)
@@ -380,6 +412,7 @@ public:
      {
       if(!m_initialized)
          return;
+      m_update_count++;
 
       SSelectionEnvironment environment;
       const bool environment_valid=ReadEnvironment(environment);
@@ -398,6 +431,8 @@ public:
          if(!PublishSnapshot(snapshot))
             CLogger::Error(StringFormat("MarketSelectionEngine could not publish %s.",
                                         snapshot.symbol));
+         else
+            m_snapshot_count++;
         }
      }
 
@@ -406,6 +441,10 @@ public:
       ArrayFree(m_symbols);
       CBaseEngine::Shutdown();
      }
+
+   long              UpdateCount(void) { return(m_update_count); }
+   long              SnapshotCount(void) { return(m_snapshot_count); }
+   SRuntimeContextId ContextId(void) { return(m_context.Id()); }
   };
 
 #endif // FENX_MARKET_SELECTION_ENGINE_MQH

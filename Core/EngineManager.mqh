@@ -375,6 +375,23 @@ public:
          return(0);
       return(m_last_bar_times[index]);
      }
+
+   string            GetEngineName(const int index)
+     {
+      if(index<0 || index>=ArraySize(m_engines) || m_engines[index]==NULL)
+         return("");
+      return(m_engines[index].GetName());
+     }
+
+   int               InitializedEngineCount(void)
+     {
+      return(m_initialized_engine_count);
+     }
+
+   bool              IsInitialized(void)
+     {
+      return(m_initialized);
+     }
   };
 
 #endif // FENX_CORE_ENGINE_MANAGER_MQH
