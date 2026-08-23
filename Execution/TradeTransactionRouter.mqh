@@ -7,6 +7,8 @@
 #include "../Common/Types.mqh"
 #include "ExecutionEngine.mqh"
 #include "PositionLifecycleRegistry.mqh"
+#include "PositionOwnershipArbiter.mqh"
+#include "ExecutionIntegritySnapshotStore.mqh"
 
 //--- MT5-derived routing facts. Production fills these only from the current
 //--- transaction/request and selected history records; the harness can supply
@@ -75,10 +77,36 @@ private:
    SRuntimeContextConfig m_routes[];
    CExecutionEngine     *m_observers[];
    CPositionLifecycleRegistry m_lifecycles;
+   CExecutionIntegritySnapshotStore *m_integrity_store;
+   CPositionOwnershipArbiter        *m_ownership_arbiter;
+   int                               m_expected_route_count;
    long                  m_received_count;
    long                  m_dispatched_count;
    long                  m_external_count;
    long                  m_wrong_dispatch_count;
+
+   bool              PublishIntegrity(void)
+     {
+      if(m_integrity_store==NULL || m_expected_route_count<1)
+         return(false);
+      SExecutionIntegritySnapshot snapshot;
+      ResetExecutionIntegritySnapshot(snapshot);
+      snapshot.updated_at=TimeCurrent();
+      snapshot.expected_route_count=m_expected_route_count;
+      snapshot.route_count=ArraySize(m_routes);
+      snapshot.received_count=m_received_count;
+      snapshot.dispatched_count=m_dispatched_count;
+      snapshot.external_count=m_external_count;
+      snapshot.wrong_dispatch_count=m_wrong_dispatch_count;
+      snapshot.lifecycle_count=m_lifecycles.Count();
+      snapshot.finalized_lifecycle_count=m_lifecycles.FinalizedCount();
+      snapshot.wrong_owner_count=m_lifecycles.WrongOwnerCount();
+      snapshot.duplicate_lifecycle_count=m_lifecycles.DuplicateEventCount();
+      snapshot.ownership_conflict_count=(m_ownership_arbiter==NULL ? 0 :
+         m_ownership_arbiter.ConflictCount());
+      snapshot.is_valid=(snapshot.route_count==snapshot.expected_route_count);
+      return(m_integrity_store.Set(snapshot));
+     }
 
    int               FindRoute(const SRuntimeContextId &context_id,
                                const long magic)
@@ -198,6 +226,25 @@ public:
       m_dispatched_count=0;
       m_external_count=0;
       m_wrong_dispatch_count=0;
+      m_integrity_store=NULL;
+      m_ownership_arbiter=NULL;
+      m_expected_route_count=0;
+     }
+
+   //--- Connects the passive Health fact sink only after all routes exist.
+   //--- No routing or position behavior is changed by this attachment.
+   bool              AttachIntegrityStore(
+                        CExecutionIntegritySnapshotStore &integrity_store,
+                        CPositionOwnershipArbiter &ownership_arbiter,
+                        const int expected_route_count)
+     {
+      if(expected_route_count<1 || ArraySize(m_routes)!=expected_route_count)
+         return(false);
+      m_integrity_store=GetPointer(integrity_store);
+      m_ownership_arbiter=GetPointer(ownership_arbiter);
+      m_expected_route_count=expected_route_count;
+      return(m_integrity_store!=NULL && m_ownership_arbiter!=NULL &&
+             PublishIntegrity());
      }
 
    bool              RegisterRoute(const SRuntimeContextConfig &config,
@@ -274,10 +321,12 @@ public:
       if(!Resolve(facts,result))
         {
          m_external_count++;
+         PublishIntegrity();
          return(false);
         }
       m_dispatched_count++;
       ObserveLifecycle(result.context_index,facts);
+      PublishIntegrity();
       return(true);
      }
 
@@ -290,12 +339,14 @@ public:
       if(!ExtractFacts(transaction,request,facts))
         {
          m_external_count++;
+         PublishIntegrity();
          return(false);
         }
       STradeTransactionRouteResult route;
       if(!Resolve(facts,route))
         {
          m_external_count++;
+         PublishIntegrity();
          return(false);
         }
       if(route.dispatch_count!=1 || route.context_index<0 ||
@@ -303,11 +354,13 @@ public:
          m_observers[route.context_index]==NULL)
         {
          m_wrong_dispatch_count++;
+         PublishIntegrity();
          return(false);
         }
       m_observers[route.context_index].ObserveTradeTransaction(transaction);
       m_dispatched_count++;
       ObserveLifecycle(route.context_index,facts);
+      PublishIntegrity();
       return(true);
      }
 
@@ -330,6 +383,9 @@ public:
       m_dispatched_count=0;
       m_external_count=0;
       m_wrong_dispatch_count=0;
+      m_integrity_store=NULL;
+      m_ownership_arbiter=NULL;
+      m_expected_route_count=0;
      }
   };
 

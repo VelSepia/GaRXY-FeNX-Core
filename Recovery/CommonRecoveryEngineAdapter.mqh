@@ -44,6 +44,10 @@ private:
 
    void              ResetSnapshot(SCommonRecoverySnapshot &snapshot)
      {
+      snapshot.runtime_context_id.symbol="";
+      snapshot.runtime_context_id.timeframe=PERIOD_CURRENT;
+      snapshot.entry_context_id.symbol="";
+      snapshot.entry_context_id.timeframe=PERIOD_CURRENT;
       snapshot.symbol="";
       snapshot.timeframe="";
       snapshot.snapshot_version=FENX_COMMON_RECOVERY_SNAPSHOT_VERSION;
@@ -359,6 +363,8 @@ public:
          return(false);
       SCommonRecoveryObserverRuntime runtime=m_runtimes[index];
       ResetSnapshot(snapshot);
+      snapshot.runtime_context_id.symbol=standby.symbol;
+      snapshot.runtime_context_id.timeframe=m_timeframe;
       snapshot.symbol=standby.symbol;
       snapshot.timeframe=EnumToString(m_timeframe);
       snapshot.recovery_evaluation_time=evaluation_time;
@@ -384,6 +390,7 @@ public:
       snapshot.entry_snapshot_available=entry_available;
       if(entry_available)
         {
+         snapshot.entry_context_id=snapshot.runtime_context_id;
          snapshot.entry_evaluation_sequence=entry.entry_evaluation_sequence;
          snapshot.entry_snapshot_updated_at=entry.updated_at;
          snapshot.execution_gate_allowed=entry.execution_gate_allowed;
@@ -579,10 +586,13 @@ public:
       return(count);
      }
 
-   void              LogSummary(void)
+   void              LogSummary(const string context_name="")
      {
-      CLogger::Info(StringFormat(
-         "[COMMON_RECOVERY_SUMMARY] RecoveryAuditCount=%I64d;RecoveryStartedCount=%I64d;RecoveryCompletedCount=%I64d;RecoveryFailedCount=%I64d;RecoveryEscalatedCount=%I64d;OpenLifecycleCount=%d;EntryResumeCount=%I64d;StandbySourceCount=%I64d;RiskSourceCount=%I64d;OtherSourceCount=%I64d;DataLeakCount=%I64d;InvalidCount=%I64d;CurrentSnapshotCount=%d;BoundedHistoryCount=%d;HistoryLimit=%d;GlobalKeys=0;PerSymbolKeys=0",
+      const string prefix=(StringLen(context_name)==0 ?
+         "[COMMON_RECOVERY_SUMMARY] " :
+         "[CONTEXT_RECOVERY_SUMMARY] Context="+context_name+";");
+      CLogger::Info(prefix+StringFormat(
+         "RecoveryAuditCount=%I64d;RecoveryStartedCount=%I64d;RecoveryCompletedCount=%I64d;RecoveryFailedCount=%I64d;RecoveryEscalatedCount=%I64d;OpenLifecycleCount=%d;EntryResumeCount=%I64d;StandbySourceCount=%I64d;RiskSourceCount=%I64d;OtherSourceCount=%I64d;DataLeakCount=%I64d;InvalidCount=%I64d;CurrentSnapshotCount=%d;BoundedHistoryCount=%d;HistoryLimit=%d;GlobalKeys=0;PerSymbolKeys=0",
          m_next_audit_sequence,m_recovery_started_count,
          m_recovery_completed_count,m_recovery_failed_count,
          m_recovery_escalated_count,OpenLifecycleCount(),m_entry_resume_count,

@@ -59,6 +59,8 @@ private:
 
    void              ResetSnapshot(SCommonHealthSnapshot &snapshot)
      {
+      snapshot.runtime_context_id.symbol="";
+      snapshot.runtime_context_id.timeframe=PERIOD_CURRENT;
       snapshot.symbol="";
       snapshot.timeframe="";
       snapshot.snapshot_version=FENX_COMMON_HEALTH_SNAPSHOT_VERSION;
@@ -582,6 +584,8 @@ public:
          m_data_leak_count++;
 
       ResetSnapshot(snapshot);
+      snapshot.runtime_context_id.symbol=measurement.symbol;
+      snapshot.runtime_context_id.timeframe=m_timeframe;
       snapshot.symbol=measurement.symbol;
       snapshot.timeframe=measurement.timeframe;
       snapshot.updated_at=evaluation_time;
@@ -860,10 +864,13 @@ public:
       return(count);
      }
 
-   void              LogSummary(void)
+   void              LogSummary(const string context_name="")
      {
-      CLogger::Info(StringFormat(
-         "[COMMON_HEALTH_SUMMARY] HealthEvaluationCount=%I64d;HealthyCount=%I64d;DegradedCount=%I64d;CriticalCount=%I64d;OrderRequestedCount=%I64d;OrderAcceptedCount=%I64d;OrderRejectedCount=%I64d;CloseRequestedCount=%I64d;CloseAcceptedCount=%I64d;CloseFailedCount=%I64d;RetryCount=%I64d;RuntimeErrorCountAvailable=%s;RuntimeErrorCount=%I64d;SequenceErrorCount=%I64d;LifecycleErrorCount=%I64d;StateTransitionErrorCountAvailable=%s;StateTransitionErrorCount=%I64d;DataLeakCount=%I64d;OpenExitLifecycleCount=%d;OpenRecoveryLifecycleCount=%d;CurrentSnapshotCount=%d;BoundedHistoryCount=%d;HistoryLimit=%d;GlobalKeys=0;PerSymbolKeys=0",
+      const string prefix=(StringLen(context_name)==0 ?
+         "[COMMON_HEALTH_SUMMARY] " :
+         "[CONTEXT_HEALTH_SUMMARY] Context="+context_name+";");
+      CLogger::Info(prefix+StringFormat(
+         "HealthEvaluationCount=%I64d;HealthyCount=%I64d;DegradedCount=%I64d;CriticalCount=%I64d;OrderRequestedCount=%I64d;OrderAcceptedCount=%I64d;OrderRejectedCount=%I64d;CloseRequestedCount=%I64d;CloseAcceptedCount=%I64d;CloseFailedCount=%I64d;RetryCount=%I64d;RuntimeErrorCountAvailable=%s;RuntimeErrorCount=%I64d;SequenceErrorCount=%I64d;LifecycleErrorCount=%I64d;StateTransitionErrorCountAvailable=%s;StateTransitionErrorCount=%I64d;DataLeakCount=%I64d;OpenExitLifecycleCount=%d;OpenRecoveryLifecycleCount=%d;CurrentSnapshotCount=%d;BoundedHistoryCount=%d;HistoryLimit=%d;GlobalKeys=0;PerSymbolKeys=0",
          m_next_evaluation_sequence,m_healthy_count,m_degraded_count,
          m_critical_count,m_order_requested_count,m_order_accepted_count,
          m_order_rejected_count,m_close_requested_count,m_close_accepted_count,

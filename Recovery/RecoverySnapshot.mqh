@@ -5,6 +5,7 @@
 #define FENX_COMMON_RECOVERY_SNAPSHOT_MQH
 
 #include "../Common/Constants.mqh"
+#include "../Common/Types.mqh"
 
 //--- Passive, typed view of recovery facts already decided by StandbyEngine,
 //--- RiskEngine, and StateManager. No field in this structure grants trading
@@ -12,6 +13,8 @@
 struct SCommonRecoverySnapshot
   {
    //--- Identity
+   SRuntimeContextId runtime_context_id;
+   SRuntimeContextId entry_context_id;
    string   symbol;
    string   timeframe;
    string   snapshot_version;
@@ -136,6 +139,9 @@ public:
       snapshot.invalid_reason="";
 
       if(StringLen(snapshot.symbol)==0 || StringLen(snapshot.timeframe)==0 ||
+         !IsValidRuntimeContextId(snapshot.runtime_context_id) ||
+         snapshot.runtime_context_id.symbol!=snapshot.symbol ||
+         EnumToString(snapshot.runtime_context_id.timeframe)!=snapshot.timeframe ||
          StringLen(snapshot.snapshot_version)==0 || snapshot.updated_at<=0 ||
          snapshot.recovery_evaluation_time<=0 ||
          snapshot.updated_at<snapshot.recovery_evaluation_time ||
@@ -200,14 +206,18 @@ public:
          return(false);
         }
       if(snapshot.entry_snapshot_available &&
-         (snapshot.entry_evaluation_sequence<=0 ||
+         (!IsValidRuntimeContextId(snapshot.entry_context_id) ||
+          !RuntimeContextEquals(snapshot.entry_context_id,
+                                snapshot.runtime_context_id) ||
+          snapshot.entry_evaluation_sequence<=0 ||
           snapshot.entry_snapshot_updated_at<=0))
         {
          snapshot.invalid_reason="Recovery Entry linkage is invalid.";
          return(false);
         }
       if(!snapshot.entry_snapshot_available &&
-         (snapshot.entry_evaluation_sequence!=0 ||
+         (IsValidRuntimeContextId(snapshot.entry_context_id) ||
+          snapshot.entry_evaluation_sequence!=0 ||
           snapshot.entry_snapshot_updated_at!=0 ||
           snapshot.execution_gate_allowed))
         {

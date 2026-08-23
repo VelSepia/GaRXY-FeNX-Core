@@ -26,6 +26,9 @@
 #include "../Execution/ExecutionEngine.mqh"
 #include "../Execution/PositionOwnershipArbiter.mqh"
 #include "../Execution/TradeTransactionRouter.mqh"
+#include "../Recovery/CommonRecoveryEngine.mqh"
+#include "../Health/CommonHealthEngine.mqh"
+#include "../Health/GlobalHealthAggregateEngine.mqh"
 #include "EngineManager.mqh"
 #include "StateManager.mqh"
 
@@ -77,8 +80,13 @@ private:
    bool                  m_analysis_prepared;
    bool                  m_decision_safety_prepared;
    bool                  m_execution_prepared;
+   bool                  m_recovery_health_prepared;
    CExecutionEngine      m_execution;
    CExecutionEngine     *m_execution_external;
+   CCommonRecoveryEngine m_recovery;
+   CCommonRecoveryEngine *m_recovery_external;
+   CCommonHealthEngine   m_health;
+   CCommonHealthEngine  *m_health_external;
    CVolatilityAnalyzer   m_volatility;
    CRangeDetector        m_range;
    CTrendDetector        m_trend;
@@ -102,7 +110,10 @@ public:
       m_analysis_prepared=false;
       m_decision_safety_prepared=false;
       m_execution_prepared=false;
+      m_recovery_health_prepared=false;
       m_execution_external=NULL;
+      m_recovery_external=NULL;
+      m_health_external=NULL;
      }
 
    bool              Configure(const SRuntimeContextConfig &config,
@@ -118,7 +129,10 @@ public:
       m_analysis_prepared=false;
       m_decision_safety_prepared=false;
       m_execution_prepared=false;
+      m_recovery_health_prepared=false;
       m_execution_external=NULL;
+      m_recovery_external=NULL;
+      m_health_external=NULL;
       m_local_state.Reset();
       if(!m_local_state.ConfigureContext(config.id))
          return(false);
@@ -246,6 +260,59 @@ public:
                                              m_local_state,RUNMODE_TICK));
      }
 
+   //--- Primary binds the established legacy observer instances so their
+   //--- registration position and counters remain unchanged. Auxiliary
+   //--- contexts own isolated observers and use only typed local stores.
+   bool              PrepareRecoveryHealth(
+                        CCommonRecoveryEngine *primary_recovery,
+                        CCommonHealthEngine *primary_health,
+                        CCommonSnapshotStore &analysis_store,
+                        CCommonSnapshotStore &decision_store,
+                        CCommonSnapshotStore &execution_store,
+                        CCommonSnapshotStore &output_store,
+                        const bool is_primary)
+     {
+      if(!m_available)
+         return(true);
+      if(!m_execution_prepared || m_recovery_health_prepared)
+         return(m_recovery_health_prepared);
+      if(is_primary)
+        {
+         if(primary_recovery==NULL || primary_health==NULL)
+            return(false);
+         m_recovery_external=primary_recovery;
+         m_health_external=primary_health;
+        }
+      else
+        {
+         if(!m_recovery.SetRuntimeContext(m_config.id) ||
+            !m_recovery.SetContextStores(decision_store,execution_store,
+                                         output_store) ||
+            !m_health.SetRuntimeContext(m_config.id) ||
+            !m_health.SetContextStores(analysis_store,decision_store,
+                                       execution_store,output_store))
+            return(false);
+        }
+      m_recovery_health_prepared=true;
+      return(true);
+     }
+
+   bool              RegisterRecoveryHealth(CEngineManager &manager,
+                                             const bool is_primary)
+     {
+      if(!m_available)
+         return(true);
+      if(!m_recovery_health_prepared)
+         return(false);
+      // Primary remains at the exact legacy tail position in the caller.
+      if(is_primary)
+         return(true);
+      return(manager.RegisterContextDataView(m_recovery,m_config.id,
+                                             m_local_state,RUNMODE_TICK) &&
+             manager.RegisterContextDataView(m_health,m_config.id,
+                                             m_local_state,RUNMODE_TICK));
+     }
+
    SRuntimeContextConfig Config(void)
      {
       return(m_config);
@@ -282,12 +349,31 @@ public:
      }
 
    bool              IsExecutionPrepared(void) { return(m_execution_prepared); }
+   bool              IsRecoveryHealthPrepared(void)
+     {
+      return(m_recovery_health_prepared);
+     }
    CExecutionEngine *Execution(void)
      {
       if(!m_execution_prepared)
          return(NULL);
       return(m_execution_external!=NULL ? m_execution_external :
              GetPointer(m_execution));
+     }
+
+   CCommonRecoveryEngine *Recovery(void)
+     {
+      if(!m_recovery_health_prepared)
+         return(NULL);
+      return(m_recovery_external!=NULL ? m_recovery_external :
+             GetPointer(m_recovery));
+     }
+
+   CCommonHealthEngine *Health(void)
+     {
+      if(!m_recovery_health_prepared)
+         return(NULL);
+      return(m_health_external!=NULL ? m_health_external : GetPointer(m_health));
      }
 
    int               DecisionSafetyEngineCount(void)
@@ -332,11 +418,18 @@ private:
    bool            m_decision_safety_registered;
    bool            m_execution_prepared;
    bool            m_execution_registered;
+   bool            m_recovery_health_prepared;
+   bool            m_recovery_health_registered;
+   bool            m_global_health_registered;
    CCommonSnapshotStore m_decision_snapshot_store;
    CCommonSnapshotStore m_execution_snapshot_store;
+   CCommonSnapshotStore m_recovery_health_snapshot_store;
    CGlobalRiskAggregateStore m_global_risk_aggregate_store;
    CGlobalRiskAggregateEngine m_global_risk_aggregate_engine;
    CPositionOwnershipArbiter m_position_ownership_arbiter;
+   CExecutionIntegritySnapshotStore m_execution_integrity_store;
+   CGlobalHealthAggregateStore m_global_health_aggregate_store;
+   CGlobalHealthAggregateEngine m_global_health_aggregate_engine;
 
    bool              BrokerContextAvailable(const SRuntimeContextConfig &config)
      {
@@ -363,6 +456,9 @@ public:
       m_decision_safety_registered=false;
       m_execution_prepared=false;
       m_execution_registered=false;
+      m_recovery_health_prepared=false;
+      m_recovery_health_registered=false;
+      m_global_health_registered=false;
      }
 
    //--- Pure preflight: identity/policy validation is kept separate from
@@ -595,7 +691,70 @@ public:
             !router.RegisterRoute(m_contexts[index].Config(),engine))
             return(false);
         }
-      return(router.RouteCount()==AvailableContextCount());
+      if(router.RouteCount()!=AvailableContextCount())
+         return(false);
+      return(router.AttachIntegrityStore(m_execution_integrity_store,
+                                         m_position_ownership_arbiter,
+                                         AvailableContextCount()));
+     }
+
+   //--- Promotes only the passive Recovery/Health layer. All Task030 source
+   //--- engines and execution routes are already prepared before this call.
+   bool              PrepareRecoveryHealth(
+                        CCommonRecoveryEngine &primary_recovery,
+                        CCommonHealthEngine &primary_health,
+                        CCommonSnapshotStore &primary_store)
+     {
+      if(!m_initialized || !m_execution_prepared)
+         return(false);
+      if(m_recovery_health_prepared)
+         return(true);
+      m_recovery_health_snapshot_store.Clear();
+      m_global_health_aggregate_store.Clear();
+      for(int index=0;index<ArraySize(m_contexts);index++)
+        {
+         if(!m_contexts[index].PrepareRecoveryHealth(
+               GetPointer(primary_recovery),GetPointer(primary_health),
+               primary_store,m_decision_snapshot_store,
+               m_execution_snapshot_store,m_recovery_health_snapshot_store,
+               index==m_primary_index))
+            return(false);
+        }
+      SPortfolioContextDefinition definitions[];
+      if(!ExportPortfolioDefinitions(definitions) ||
+         !m_global_health_aggregate_engine.Configure(
+            primary_store,m_recovery_health_snapshot_store,
+            m_execution_integrity_store,m_global_health_aggregate_store,
+            definitions))
+         return(false);
+      m_recovery_health_prepared=true;
+      return(true);
+     }
+
+   //--- Auxiliary observers run after auxiliary Execution. Primary observers
+   //--- are deliberately skipped and retain their legacy registration points.
+   bool              RegisterRecoveryHealth(CEngineManager &manager)
+     {
+      if(!m_recovery_health_prepared || m_recovery_health_registered)
+         return(false);
+      for(int index=0;index<ArraySize(m_contexts);index++)
+         if(!m_contexts[index].RegisterRecoveryHealth(manager,
+                                                      index==m_primary_index))
+            return(false);
+      m_recovery_health_registered=true;
+      return(true);
+     }
+
+   //--- Registered after the legacy Primary Health observer so every context
+   //--- snapshot and execution-integrity fact is complete for the current tick.
+   bool              RegisterGlobalHealth(CEngineManager &manager)
+     {
+      if(!m_recovery_health_registered || m_global_health_registered)
+         return(false);
+      if(!manager.Register(m_global_health_aggregate_engine,RUNMODE_TICK))
+         return(false);
+      m_global_health_registered=true;
+      return(true);
      }
 
    //--- Production path. Broker discovery and selection are isolated here;
@@ -669,10 +828,16 @@ public:
       m_decision_safety_registered=false;
       m_execution_prepared=false;
       m_execution_registered=false;
+      m_recovery_health_prepared=false;
+      m_recovery_health_registered=false;
+      m_global_health_registered=false;
       m_decision_snapshot_store.Clear();
       m_execution_snapshot_store.Clear();
+      m_recovery_health_snapshot_store.Clear();
       m_global_risk_aggregate_store.Clear();
       m_position_ownership_arbiter.Clear();
+      m_execution_integrity_store.Clear();
+      m_global_health_aggregate_store.Clear();
      }
 
    int               Count(void)
@@ -725,6 +890,9 @@ public:
    bool              IsDecisionSafetyRegistered(void) { return(m_decision_safety_registered); }
    bool              IsExecutionPrepared(void) { return(m_execution_prepared); }
    bool              IsExecutionRegistered(void) { return(m_execution_registered); }
+   bool              IsRecoveryHealthPrepared(void) { return(m_recovery_health_prepared); }
+   bool              IsRecoveryHealthRegistered(void) { return(m_recovery_health_registered); }
+   bool              IsGlobalHealthRegistered(void) { return(m_global_health_registered); }
 
    int               AvailableContextCount(void)
      {
@@ -766,6 +934,22 @@ public:
       return(count>1 ? count-1 : 0);
      }
 
+   int               RecoveryHealthInfrastructureCount(void)
+     {
+      int count=0;
+      for(int index=0;index<ArraySize(m_contexts);index++)
+         if(m_contexts[index].IsRecoveryHealthPrepared()) count++;
+      return(count);
+     }
+
+   int               RegisteredContextRecoveryHealthEngineCount(void)
+     {
+      if(!m_recovery_health_registered)
+         return(0);
+      const int contexts=RecoveryHealthInfrastructureCount();
+      return(contexts>1 ? 2*(contexts-1) : 0);
+     }
+
    CCommonSnapshotStore *DecisionSnapshotStore(void)
      {
       return(GetPointer(m_decision_snapshot_store));
@@ -789,6 +973,21 @@ public:
    CPositionOwnershipArbiter *PositionOwnershipArbiter(void)
      {
       return(GetPointer(m_position_ownership_arbiter));
+     }
+
+   CCommonSnapshotStore *RecoveryHealthSnapshotStore(void)
+     {
+      return(GetPointer(m_recovery_health_snapshot_store));
+     }
+
+   CExecutionIntegritySnapshotStore *ExecutionIntegrityStore(void)
+     {
+      return(GetPointer(m_execution_integrity_store));
+     }
+
+   CGlobalHealthAggregateStore *GlobalHealthAggregateStore(void)
+     {
+      return(GetPointer(m_global_health_aggregate_store));
      }
 
    //--- Exports read-only value metadata for the global shadow portfolio.

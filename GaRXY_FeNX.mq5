@@ -187,6 +187,13 @@ int OnInit()
       CLogger::Error("Unable to attach CommonSnapshotStore to CommonHealthEngine.");
       return(INIT_FAILED);
      }
+   if(!g_controller.PrepareRuntimeContextRecoveryHealth(
+         g_common_recovery_engine,g_common_health_engine,
+         g_common_snapshot_store))
+     {
+      CLogger::Error("Unable to prepare context Recovery/Health observers.");
+      return(INIT_FAILED);
+     }
 
    if(!g_controller.RegisterRuntimeContextAnalysisEngines())
      {
@@ -217,6 +224,12 @@ int OnInit()
    if(!g_controller.RegisterRuntimeContextExecutionEngines())
      {
       CLogger::Error("Unable to register context execution infrastructure.");
+      return(INIT_FAILED);
+     }
+
+   if(!g_controller.RegisterRuntimeContextRecoveryHealthEngines())
+     {
+      CLogger::Error("Unable to register context Recovery/Health observers.");
       return(INIT_FAILED);
      }
 
@@ -275,6 +288,12 @@ int OnInit()
    if(!g_controller.RegisterEngine(g_common_health_engine))
      {
       CLogger::Error("Unable to register CommonHealthEngine.");
+      return(INIT_FAILED);
+     }
+
+   if(!g_controller.RegisterGlobalHealthAggregateEngine())
+     {
+      CLogger::Error("Unable to register Global Health aggregate.");
       return(INIT_FAILED);
      }
 
@@ -367,6 +386,34 @@ double OnTester(void)
       (lifecycles==NULL ? 0 : lifecycles.FinalizedCount()),
       (lifecycles==NULL ? 0 : lifecycles.WrongOwnerCount()),
       (lifecycles==NULL ? 0 : lifecycles.DuplicateEventCount())));
+   SGlobalHealthAggregateSnapshot global_health;
+   ResetGlobalHealthAggregateSnapshot(global_health);
+   bool global_health_available=false;
+   if(registry!=NULL)
+     {
+      CGlobalHealthAggregateStore *health_store=
+         registry.GlobalHealthAggregateStore();
+      global_health_available=(health_store!=NULL &&
+                               health_store.GetLatest(global_health));
+     }
+   CLogger::Info(StringFormat(
+      "[TASK031_SUMMARY] Result=%s;Contexts=%d;RecoveryInfrastructure=%d;RegisteredContextRecoveryHealth=%d;Healthy=%d;Degraded=%d;Critical=%d;RequiredUnavailable=%d;OptionalUnavailable=%d;ExpectedInvalid=%d;ExpectedStale=%d;RecoveryCrossContext=%d;EntryResumeWrongContext=%d;HealthWrongContext=%d;ExecutionPositionRouterLinkage=%d;DataLeak=%I64d;TradeLeak=%I64d;RuntimeError=%I64d",
+      (global_health_available && global_health.is_valid ? "PASS" : "FAIL"),
+      global_health.context_count,
+      (registry==NULL ? 0 : registry.RecoveryHealthInfrastructureCount()),
+      (registry==NULL ? 0 :
+       registry.RegisteredContextRecoveryHealthEngineCount()),
+      global_health.healthy_context_count,global_health.degraded_context_count,
+      global_health.critical_context_count,
+      global_health.required_unavailable_count,
+      global_health.optional_unavailable_count,
+      global_health.expected_invalid_count,global_health.expected_stale_count,
+      global_health.recovery_cross_context_count,
+      global_health.entry_resume_wrong_context_count,
+      global_health.health_wrong_context_count,
+      global_health.execution_position_router_linkage_error_count,
+      global_health.data_leak_count,global_health.trade_leak_count,
+      global_health.runtime_error_count));
    return(FenxReportBacktestValidation(InpExecutionSymbol,
                                        InpExecutionMagicNumber));
   }

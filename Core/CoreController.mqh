@@ -23,6 +23,7 @@ private:
    bool           m_runtime_contexts_prepared;
    bool           m_runtime_decision_safety_prepared;
    bool           m_runtime_execution_prepared;
+   bool           m_runtime_recovery_health_prepared;
 
 public:
                      CCoreController(void)
@@ -31,6 +32,7 @@ public:
       m_runtime_contexts_prepared=false;
       m_runtime_decision_safety_prepared=false;
       m_runtime_execution_prepared=false;
+      m_runtime_recovery_health_prepared=false;
      }
 
    //--- Creates context-owned analysis instances before registration. The
@@ -142,6 +144,36 @@ public:
       return(m_runtime_context_registry.RegisterExecution(m_engine_manager));
      }
 
+   bool              PrepareRuntimeContextRecoveryHealth(
+                        CCommonRecoveryEngine &primary_recovery,
+                        CCommonHealthEngine &primary_health,
+                        CCommonSnapshotStore &primary_store)
+     {
+      if(m_initialized || !m_runtime_execution_prepared)
+         return(false);
+      if(m_runtime_recovery_health_prepared)
+         return(true);
+      if(!m_runtime_context_registry.PrepareRecoveryHealth(
+            primary_recovery,primary_health,primary_store))
+         return(false);
+      m_runtime_recovery_health_prepared=true;
+      return(true);
+     }
+
+   bool              RegisterRuntimeContextRecoveryHealthEngines(void)
+     {
+      if(!m_runtime_recovery_health_prepared || m_initialized)
+         return(false);
+      return(m_runtime_context_registry.RegisterRecoveryHealth(m_engine_manager));
+     }
+
+   bool              RegisterGlobalHealthAggregateEngine(void)
+     {
+      if(!m_runtime_recovery_health_prepared || m_initialized)
+         return(false);
+      return(m_runtime_context_registry.RegisterGlobalHealth(m_engine_manager));
+     }
+
    bool              Initialize(CParameterManager &parameters)
      {
       if(m_initialized)
@@ -244,6 +276,7 @@ public:
       m_runtime_contexts_prepared=false;
       m_runtime_decision_safety_prepared=false;
       m_runtime_execution_prepared=false;
+      m_runtime_recovery_health_prepared=false;
       CLogger::Info("CoreController shut down.");
      }
 

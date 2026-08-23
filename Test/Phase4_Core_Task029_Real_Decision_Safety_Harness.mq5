@@ -117,17 +117,22 @@ int OnInit(void)
       !g_controller.PrepareRuntimeContextDecisionSafety(g_portfolio) ||
       !g_controller.PrepareRuntimeContextExecution(g_primary_execution) ||
       !registry.RegisterExecutionRoutes(g_transaction_router) ||
+      !AttachPrimaryStores() ||
+      !g_controller.PrepareRuntimeContextRecoveryHealth(
+         g_primary_recovery,g_primary_health,g_analysis_snapshots) ||
       !g_controller.RegisterRuntimeContextAnalysisEngines() ||
       !g_controller.RegisterEngine(g_pair_ranking) ||
       !g_controller.RegisterEngine(g_capital_allocation) ||
       !g_controller.RegisterRuntimeContextDecisionSafetyEngines() ||
       !g_controller.RegisterRuntimeContextExecutionEngines() ||
-      !AttachPrimaryStores() || !RegisterPrimaryPipeline() ||
+      !g_controller.RegisterRuntimeContextRecoveryHealthEngines() ||
+      !RegisterPrimaryPipeline() ||
+      !g_controller.RegisterGlobalHealthAggregateEngine() ||
       !g_controller.Initialize(g_parameters))
       return(INIT_FAILED);
 
    g_ready=true;
-   Print("[TASK030 REAL] Init=PASS;SecondaryTrading=false");
+   Print("[TASK031 REAL] Init=PASS;SecondaryTrading=false;HealthAuthority=false");
    return(INIT_SUCCEEDED);
   }
 
@@ -154,6 +159,10 @@ double OnTester(void)
 
    CCommonSnapshotStore *store=registry.DecisionSnapshotStore();
    CGlobalRiskAggregateStore *aggregate_store=registry.GlobalRiskAggregateStore();
+   CCommonSnapshotStore *recovery_health_store=
+      registry.RecoveryHealthSnapshotStore();
+   CGlobalHealthAggregateStore *global_health_store=
+      registry.GlobalHealthAggregateStore();
    bool contexts_complete=(store!=NULL);
    bool state_isolated=true;
    bool source_time_safe=true;
@@ -163,6 +172,9 @@ double OnTester(void)
    long secondary_orders=0;
    long secondary_positions=0;
    int checked=0;
+   bool recovery_isolated=true;
+   bool entry_resume_isolated=true;
+   bool health_isolated=true;
    for(int index=0;index<registry.Count();index++)
      {
       CRuntimeContext *runtime=registry.ContextAt(index);
@@ -194,6 +206,22 @@ double OnTester(void)
       CStateManager *local_state=runtime.StateManager();
       state_isolated=(state_isolated && local_state!=NULL &&
                       local_state.IsContextLocal());
+      CCommonSnapshotStore *observer_store=(index==registry.PrimaryIndex() ?
+         GetPointer(g_analysis_snapshots) : recovery_health_store);
+      SCommonRecoverySnapshot recovery;
+      SCommonHealthSnapshot health;
+      const bool recovery_available=(observer_store!=NULL &&
+         observer_store.GetRecoverySnapshot(id.symbol,id.timeframe,recovery));
+      const bool health_available=(observer_store!=NULL &&
+         observer_store.GetHealthSnapshot(id.symbol,id.timeframe,health));
+      recovery_isolated=(recovery_isolated && recovery_available &&
+         RuntimeContextEquals(recovery.runtime_context_id,id));
+      health_isolated=(health_isolated && health_available &&
+         RuntimeContextEquals(health.runtime_context_id,id));
+      entry_resume_isolated=(entry_resume_isolated && recovery_available &&
+         (!recovery.entry_resume_allowed ||
+          (recovery.entry_snapshot_available &&
+           RuntimeContextEquals(recovery.entry_context_id,id))));
       if(index>0)
         {
          secondary_non_trading=(secondary_non_trading && !config.trade_enabled);
@@ -242,7 +270,23 @@ double OnTester(void)
       aggregate.future_source_count==0 && aggregate.wrong_context_count==0 &&
       aggregate_store.SequenceGapCount()==0 &&
       aggregate_store.SequenceDuplicateCount()==0);
-   const int expected_engines=13*InpTask029ContextCount+11;
+   SGlobalHealthAggregateSnapshot global_health;
+   ResetGlobalHealthAggregateSnapshot(global_health);
+   const bool global_health_ok=(global_health_store!=NULL &&
+      global_health_store.GetLatest(global_health) && global_health.is_valid &&
+      global_health.context_count==InpTask029ContextCount &&
+      global_health.available_context_count==InpTask029ContextCount &&
+      global_health.required_unavailable_count==0 &&
+      global_health.optional_unavailable_count==0 &&
+      global_health.recovery_cross_context_count==0 &&
+      global_health.entry_resume_wrong_context_count==0 &&
+      global_health.health_wrong_context_count==0 &&
+      global_health.execution_position_router_linkage_error_count==0 &&
+      global_health.data_leak_count==0 && global_health.trade_leak_count==0 &&
+      global_health.runtime_error_count==0 &&
+      global_health_store.SequenceGapCount()==0 &&
+      global_health_store.SequenceDuplicateCount()==0);
+   const int expected_engines=15*InpTask029ContextCount+10;
    const double spare=100.0*bus.RemainingCapacity()/bus.Capacity();
    const bool counts=(checked==InpTask029ContextCount &&
       registry.AnalysisEngineCount()==6*InpTask029ContextCount &&
@@ -250,6 +294,9 @@ double OnTester(void)
       registry.ExecutionInfrastructureCount()==InpTask029ContextCount &&
       registry.RegisteredContextExecutionEngineCount()==
          (InpTask029ContextCount>1 ? InpTask029ContextCount-1 : 0) &&
+      registry.RecoveryHealthInfrastructureCount()==InpTask029ContextCount &&
+      registry.RegisteredContextRecoveryHealthEngineCount()==
+         (InpTask029ContextCount>1 ? 2*(InpTask029ContextCount-1) : 0) &&
       manager.Count()==expected_engines && store!=NULL &&
       store.StandbySnapshotCount()==InpTask029ContextCount &&
       store.RiskSnapshotCount()==InpTask029ContextCount &&
@@ -258,24 +305,24 @@ double OnTester(void)
    const bool pass=(contexts_complete && state_isolated && source_time_safe &&
       secondary_non_trading && execution_initialized && strategy_capability &&
       secondary_orders==0 && secondary_positions==0 &&
-      primary_legacy_available && aggregate_ok && counts &&
+      primary_legacy_available && aggregate_ok && global_health_ok && counts &&
+      recovery_isolated && entry_resume_isolated && health_isolated &&
       bus.LegacyFallbackReadCount()==0 && bus.ContextViewWrongSymbolCount()==0 &&
       spare>=30.0);
-   PrintFormat("[TASK030 REAL SUMMARY] Result=%s;Contexts=%d;Engines=%d;DataBus=%d;Remaining=%d;Spare=%.2f;ExecutionInfrastructure=%d;RegisteredContextExecution=%d;StandbySnapshots=%d;RiskSnapshots=%d;ConfidenceSnapshots=%d;DecisionSnapshots=%d;AggregateSequence=%I64d;Active=%d;Standby=%d;RiskStopped=%d;Critical=%d;Invalid=%d;PortfolioLinkage=%d;FutureSource=%d;WrongContext=%d;LegacyWrite=0;LegacyFallback=%I64d;SecondaryEntry=0;SecondaryExit=0;SecondaryExecution=%d;SecondaryOrder=%I64d;SecondaryPosition=%I64d;CrossSymbolOrder=0;WrongContextClose=0;WrongOwnership=0",
+   PrintFormat("[TASK031 REAL SUMMARY] Result=%s;Contexts=%d;Engines=%d;DataBus=%d;Remaining=%d;Spare=%.2f;RecoveryInfrastructure=%d;RegisteredContextRecoveryHealth=%d;RecoveryCrossContext=%d;EntryResumeWrongContext=%d;HealthWrongContext=%d;ExecutionPositionRouterLinkage=%d;DataLeak=%I64d;TradeLeak=%I64d;RuntimeError=%I64d;RequiredUnavailable=%d;OptionalUnavailable=%d;ExpectedInvalid=%d;ExpectedStale=%d;SecondaryOrder=%I64d;SecondaryPosition=%I64d",
       (pass ? "PASS" : "FAIL"),checked,manager.Count(),bus.CurrentSize(),
-      bus.RemainingCapacity(),spare,registry.ExecutionInfrastructureCount(),
-      registry.RegisteredContextExecutionEngineCount(),
-      (store==NULL ? 0 : store.StandbySnapshotCount()),
-      (store==NULL ? 0 : store.RiskSnapshotCount()),
-      (store==NULL ? 0 : store.ConfidenceSnapshotCount()),
-      (store==NULL ? 0 : store.DecisionScoreSnapshotCount()),
-      aggregate.evaluation_sequence,aggregate.active_count,aggregate.standby_count,
-      aggregate.risk_stopped_count,aggregate.critical_context_count,
-      aggregate.invalid_context_count,aggregate.portfolio_linkage_error_count,
-      aggregate.future_source_count,aggregate.wrong_context_count,
-      bus.LegacyFallbackReadCount(),
-      registry.RegisteredContextExecutionEngineCount(),secondary_orders,
-      secondary_positions);
+      bus.RemainingCapacity(),spare,registry.RecoveryHealthInfrastructureCount(),
+      registry.RegisteredContextRecoveryHealthEngineCount(),
+      global_health.recovery_cross_context_count,
+      global_health.entry_resume_wrong_context_count,
+      global_health.health_wrong_context_count,
+      global_health.execution_position_router_linkage_error_count,
+      global_health.data_leak_count,global_health.trade_leak_count,
+      global_health.runtime_error_count,
+      global_health.required_unavailable_count,
+      global_health.optional_unavailable_count,
+      global_health.expected_invalid_count,global_health.expected_stale_count,
+      secondary_orders,secondary_positions);
    return(pass ? 1.0 : 0.0);
   }
 

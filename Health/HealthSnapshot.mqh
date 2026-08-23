@@ -5,6 +5,7 @@
 #define FENX_COMMON_HEALTH_SNAPSHOT_MQH
 
 #include "../Common/Constants.mqh"
+#include "../Common/Types.mqh"
 
 //--- Passive system-health classification. These values are diagnostic only;
 //--- no trading, permission, StateManager, or recovery consumer reads them.
@@ -129,6 +130,7 @@ struct SCommonHealthMeasurement
 struct SCommonHealthSnapshot
   {
    //--- Identity and audit sequence
+   SRuntimeContextId runtime_context_id;
    string   symbol;
    string   timeframe;
    string   snapshot_version;
@@ -334,6 +336,9 @@ public:
       snapshot.is_fresh=false;
       snapshot.invalid_reason="";
       if(StringLen(snapshot.symbol)==0 || StringLen(snapshot.timeframe)==0 ||
+         !IsValidRuntimeContextId(snapshot.runtime_context_id) ||
+         snapshot.runtime_context_id.symbol!=snapshot.symbol ||
+         EnumToString(snapshot.runtime_context_id.timeframe)!=snapshot.timeframe ||
          StringLen(snapshot.snapshot_version)==0 || snapshot.updated_at<=0 ||
          snapshot.health_evaluation_time<=0 ||
          snapshot.updated_at<snapshot.health_evaluation_time ||
