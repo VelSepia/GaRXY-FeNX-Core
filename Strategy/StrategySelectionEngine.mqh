@@ -556,6 +556,14 @@ private:
 
    bool LoadSymbols(CParameterManager &parameters)
      {
+      SRuntimeContextId context_id;
+      if(m_data_bus!=NULL && m_data_bus.GetActiveContextId(context_id))
+        {
+         if(ArrayResize(m_symbols,1)!=1)
+            return(false);
+         m_symbols[0]=context_id.symbol;
+         return(true);
+        }
       const int symbol_count=parameters.MarketSelectionSymbolCount();
       if(symbol_count<1 || symbol_count>FENX_MARKET_SELECTION_MAX_SYMBOLS ||
          ArrayResize(m_symbols,symbol_count)!=symbol_count)
@@ -665,8 +673,9 @@ public:
       if(style_global_valid)
          style_global_valid=style_global.data_valid &&
                             CalculateFreshness(style_global.updated_at,style_global_freshness);
-      if(!environment_valid || !ranking_global_valid || !allocation_global_valid ||
-         !style_global_valid)
+      if((!environment_valid || !ranking_global_valid || !allocation_global_valid ||
+          !style_global_valid) &&
+         (m_data_bus==NULL || !m_data_bus.ContextViewActive()))
          CLogger::Warning("StrategySelectionEngine is waiting for valid, fresh Environment, ranking, allocation, and style data.");
 
       const int symbol_count=ArraySize(m_symbols);

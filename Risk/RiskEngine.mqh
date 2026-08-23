@@ -130,6 +130,14 @@ private:
    bool          m_consistency_verified;
    CCommonSnapshotStore *m_snapshot_store;
 
+   ENUM_TIMEFRAMES RuntimeTimeframe(void)
+     {
+      SRuntimeContextId context_id;
+      if(m_data_bus!=NULL && m_data_bus.GetActiveContextId(context_id))
+         return(context_id.timeframe);
+      return((ENUM_TIMEFRAMES)_Period);
+     }
+
    double ClampPercent(const double value)
      {
       return(MathMax(0.0,MathMin(100.0,value)));
@@ -223,7 +231,7 @@ private:
       snapshot.escalation_required=true;
       snapshot.data_valid=false;
       snapshot.updated_at=TimeCurrent();
-      snapshot.timeframe=EnumToString(_Period);
+      snapshot.timeframe=EnumToString(RuntimeTimeframe());
       snapshot.snapshot_version=FENX_COMMON_RISK_SNAPSHOT_VERSION;
       snapshot.is_valid=false;
       snapshot.is_fresh=false;
@@ -753,6 +761,15 @@ private:
 
    bool LoadSymbols(CParameterManager &parameters)
      {
+      SRuntimeContextId context_id;
+      if(m_data_bus!=NULL && m_data_bus.GetActiveContextId(context_id))
+        {
+         if(ArrayResize(m_symbols,1)!=1 || ArrayResize(m_runtime,1)!=1)
+            return(false);
+         m_symbols[0]=context_id.symbol;
+         ResetRuntime(m_runtime[0]);
+         return(true);
+        }
       const int symbol_count=parameters.MarketSelectionSymbolCount();
       if(symbol_count<0 || symbol_count>FENX_MARKET_SELECTION_MAX_SYMBOLS ||
          ArrayResize(m_symbols,symbol_count)!=symbol_count ||
@@ -1374,6 +1391,8 @@ private:
    void LogTypedTelemetry(const string event_name,
                           const SRiskSnapshot &snapshot)
      {
+      if(m_data_bus!=NULL && m_data_bus.ContextViewActive())
+         return;
       string risk_stop_reason=snapshot.risk_stop_reason;
       StringReplace(risk_stop_reason,";",",");
       CLogger::Info(StringFormat(
@@ -1406,12 +1425,12 @@ private:
 
       SRiskSnapshot previous;
       const bool had_previous=m_snapshot_store.GetRiskSnapshot(
-         snapshot.symbol,_Period,previous);
-      if(!m_snapshot_store.SetRiskSnapshot(snapshot.symbol,_Period,snapshot))
+         snapshot.symbol,RuntimeTimeframe(),previous);
+      if(!m_snapshot_store.SetRiskSnapshot(snapshot.symbol,RuntimeTimeframe(),snapshot))
          return(false);
 
       SRiskSnapshot stored;
-      if(!m_snapshot_store.GetRiskSnapshot(snapshot.symbol,_Period,stored) ||
+      if(!m_snapshot_store.GetRiskSnapshot(snapshot.symbol,RuntimeTimeframe(),stored) ||
          !SameTypedSnapshot(snapshot,stored))
          return(false);
 
@@ -1606,7 +1625,8 @@ public:
                                  environment.trend_data_valid && pipeline.pair_ranking_valid &&
                                  pipeline.allocation_valid && pipeline.style_valid &&
                                  pipeline.strategy_valid && pipeline.standby_valid);
-      if(!upstream_valid && !m_invalid_system_logged)
+      if(!upstream_valid && !m_invalid_system_logged &&
+         (m_data_bus==NULL || !m_data_bus.ContextViewActive()))
         {
          CLogger::Error(StringFormat(
             "RiskEngine detected invalid, missing, or stale upstream risk data: %s.",

@@ -23,6 +23,14 @@ private:
    bool                  m_valid_snapshot_logged[];
    datetime              m_last_telemetry_bar[];
    SConfidenceCompletenessHistory m_transition_histories[];
+
+   ENUM_TIMEFRAMES RuntimeTimeframe(void)
+     {
+      SRuntimeContextId context_id;
+      if(m_data_bus!=NULL && m_data_bus.GetActiveContextId(context_id))
+         return(context_id.timeframe);
+      return((ENUM_TIMEFRAMES)_Period);
+     }
    CCommonSnapshotStore *m_snapshot_store;
 
    void ResetSource(SConfidenceSourceSnapshot &source,const string stage)
@@ -39,7 +47,7 @@ private:
    void ResetSnapshot(SConfidenceSnapshot &snapshot,const string symbol)
      {
       snapshot.symbol=symbol;
-      snapshot.timeframe=EnumToString(_Period);
+      snapshot.timeframe=EnumToString(RuntimeTimeframe());
       snapshot.snapshot_version=FENX_COMMON_CONFIDENCE_SNAPSHOT_VERSION;
       snapshot.updated_at=TimeCurrent();
       snapshot.validity_state="INVALID";
@@ -83,7 +91,7 @@ private:
    void ApplyCompletenessTransition(const int symbol_index,
                                     SConfidenceSnapshot &snapshot)
      {
-      const datetime bar_time=iTime(snapshot.symbol,_Period,0);
+      const datetime bar_time=iTime(snapshot.symbol,RuntimeTimeframe(),0);
       if(bar_time<=0)
         {
          snapshot.completeness_transition="WINDOW_INCOMPLETE";
@@ -563,13 +571,13 @@ private:
    bool StoreTypedSnapshot(const int symbol_index,const SConfidenceSnapshot &snapshot)
      {
       if(m_snapshot_store==NULL ||
-         !m_snapshot_store.SetConfidenceSnapshot(snapshot.symbol,_Period,snapshot))
+         !m_snapshot_store.SetConfidenceSnapshot(snapshot.symbol,RuntimeTimeframe(),snapshot))
          return(false);
       if(m_consistency_verified[symbol_index])
          return(true);
 
       SConfidenceSnapshot stored;
-      if(!m_snapshot_store.GetConfidenceSnapshot(snapshot.symbol,_Period,stored))
+      if(!m_snapshot_store.GetConfidenceSnapshot(snapshot.symbol,RuntimeTimeframe(),stored))
          return(false);
       return(SameSnapshot(snapshot,stored));
      }
@@ -633,7 +641,9 @@ private:
 
    void PublishTelemetry(const int symbol_index,const SConfidenceSnapshot &snapshot)
      {
-      const datetime bar_time=iTime(snapshot.symbol,_Period,0);
+      if(m_data_bus!=NULL && m_data_bus.ContextViewActive())
+         return;
+      const datetime bar_time=iTime(snapshot.symbol,RuntimeTimeframe(),0);
       if(bar_time<=0 || bar_time==m_last_telemetry_bar[symbol_index])
          return;
       m_last_telemetry_bar[symbol_index]=bar_time;
@@ -652,7 +662,11 @@ private:
 
    bool LoadSymbols(CParameterManager &parameters)
      {
-      const int symbol_count=parameters.MarketSelectionSymbolCount();
+      SRuntimeContextId context_id;
+      const bool context_bound=(m_data_bus!=NULL &&
+                                m_data_bus.GetActiveContextId(context_id));
+      const int symbol_count=(context_bound ? 1 :
+                              parameters.MarketSelectionSymbolCount());
       if(symbol_count<1 ||
          ArrayResize(m_symbols,symbol_count)!=symbol_count ||
          ArrayResize(m_consistency_verified,symbol_count)!=symbol_count ||
@@ -664,14 +678,17 @@ private:
 
       for(int index=0;index<symbol_count;index++)
         {
-         if(!parameters.TryGetMarketSelectionSymbol(index,m_symbols[index]))
+         if(context_bound)
+            m_symbols[index]=context_id.symbol;
+         else if(!parameters.TryGetMarketSelectionSymbol(index,m_symbols[index]))
             return(false);
          m_consistency_verified[index]=false;
          m_initial_status_logged[index]=false;
          m_valid_snapshot_logged[index]=false;
          m_last_telemetry_bar[index]=0;
          FenxResetConfidenceCompletenessHistory(
-            m_transition_histories[index],m_symbols[index],_Period);
+            m_transition_histories[index],m_symbols[index],
+            (context_bound ? context_id.timeframe : (ENUM_TIMEFRAMES)_Period));
         }
       return(true);
      }

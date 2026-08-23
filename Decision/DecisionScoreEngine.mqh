@@ -22,6 +22,14 @@ private:
    bool                  m_initial_status_logged[];
    bool                  m_valid_snapshot_logged[];
    datetime              m_last_telemetry_bar[];
+
+   ENUM_TIMEFRAMES RuntimeTimeframe(void)
+     {
+      SRuntimeContextId context_id;
+      if(m_data_bus!=NULL && m_data_bus.GetActiveContextId(context_id))
+         return(context_id.timeframe);
+      return((ENUM_TIMEFRAMES)_Period);
+     }
    CCommonSnapshotStore *m_snapshot_store;
 
    void ResetSource(SDecisionScoreSourceSnapshot &source,const string source_name)
@@ -38,7 +46,7 @@ private:
    void ResetSnapshot(SDecisionScoreSnapshot &snapshot,const string symbol)
      {
       snapshot.symbol=symbol;
-      snapshot.timeframe=EnumToString(_Period);
+      snapshot.timeframe=EnumToString(RuntimeTimeframe());
       snapshot.snapshot_version=FENX_COMMON_DECISION_SNAPSHOT_VERSION;
       snapshot.updated_at=TimeCurrent();
       snapshot.validity_state="INVALID";
@@ -435,12 +443,12 @@ private:
    bool StoreTypedSnapshot(const int symbol_index,const SDecisionScoreSnapshot &snapshot)
      {
       if(m_snapshot_store==NULL ||
-         !m_snapshot_store.SetDecisionScoreSnapshot(snapshot.symbol,_Period,snapshot))
+         !m_snapshot_store.SetDecisionScoreSnapshot(snapshot.symbol,RuntimeTimeframe(),snapshot))
          return(false);
       if(m_consistency_verified[symbol_index])
          return(true);
       SDecisionScoreSnapshot stored;
-      if(!m_snapshot_store.GetDecisionScoreSnapshot(snapshot.symbol,_Period,stored))
+      if(!m_snapshot_store.GetDecisionScoreSnapshot(snapshot.symbol,RuntimeTimeframe(),stored))
          return(false);
       return(SameSnapshot(snapshot,stored));
      }
@@ -500,7 +508,9 @@ private:
 
    void PublishTelemetry(const int symbol_index,const SDecisionScoreSnapshot &snapshot)
      {
-      const datetime bar_time=iTime(snapshot.symbol,_Period,0);
+      if(m_data_bus!=NULL && m_data_bus.ContextViewActive())
+         return;
+      const datetime bar_time=iTime(snapshot.symbol,RuntimeTimeframe(),0);
       if(bar_time<=0 || bar_time==m_last_telemetry_bar[symbol_index])
          return;
       m_last_telemetry_bar[symbol_index]=bar_time;
@@ -517,7 +527,11 @@ private:
 
    bool LoadSymbols(CParameterManager &parameters)
      {
-      const int symbol_count=parameters.MarketSelectionSymbolCount();
+      SRuntimeContextId context_id;
+      const bool context_bound=(m_data_bus!=NULL &&
+                                m_data_bus.GetActiveContextId(context_id));
+      const int symbol_count=(context_bound ? 1 :
+                              parameters.MarketSelectionSymbolCount());
       if(symbol_count<1 ||
          ArrayResize(m_symbols,symbol_count)!=symbol_count ||
          ArrayResize(m_consistency_verified,symbol_count)!=symbol_count ||
@@ -527,7 +541,9 @@ private:
          return(false);
       for(int index=0;index<symbol_count;index++)
         {
-         if(!parameters.TryGetMarketSelectionSymbol(index,m_symbols[index]))
+         if(context_bound)
+            m_symbols[index]=context_id.symbol;
+         else if(!parameters.TryGetMarketSelectionSymbol(index,m_symbols[index]))
             return(false);
          m_consistency_verified[index]=false;
          m_initial_status_logged[index]=false;

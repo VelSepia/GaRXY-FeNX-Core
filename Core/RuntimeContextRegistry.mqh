@@ -16,6 +16,13 @@
 #include "../Environment/MarketStateIntegrator.mqh"
 #include "../Environment/EnvironmentEngine.mqh"
 #include "../MarketSelection/MarketSelectionEngine.mqh"
+#include "../TradingStyle/TradingStyleEngine.mqh"
+#include "../Strategy/StrategySelectionEngine.mqh"
+#include "../Standby/StandbyEngine.mqh"
+#include "../Risk/RiskEngine.mqh"
+#include "../Risk/GlobalRiskAggregateEngine.mqh"
+#include "../Confidence/ConfidenceEngine.mqh"
+#include "../Decision/DecisionScoreEngine.mqh"
 #include "EngineManager.mqh"
 #include "StateManager.mqh"
 
@@ -65,12 +72,19 @@ private:
    bool                  m_initialized;
    bool                  m_available;
    bool                  m_analysis_prepared;
+   bool                  m_decision_safety_prepared;
    CVolatilityAnalyzer   m_volatility;
    CRangeDetector        m_range;
    CTrendDetector        m_trend;
    CMarketStateIntegrator m_market_state;
    CEnvironmentEngine    m_environment;
    CMarketSelectionEngine m_market_selection;
+   CTradingStyleEngine      m_trading_style;
+   CStrategySelectionEngine m_strategy_selection;
+   CStandbyEngine           m_standby;
+   CRiskEngine              m_risk;
+   CConfidenceEngine        m_confidence;
+   CDecisionScoreEngine     m_decision_score;
 
 public:
                      CRuntimeContext(void)
@@ -80,6 +94,7 @@ public:
       m_initialized=false;
       m_available=false;
       m_analysis_prepared=false;
+      m_decision_safety_prepared=false;
      }
 
    bool              Configure(const SRuntimeContextConfig &config,
@@ -93,7 +108,10 @@ public:
       m_available=(config.enabled && available);
       m_initialized=m_available;
       m_analysis_prepared=false;
+      m_decision_safety_prepared=false;
       m_local_state.Reset();
+      if(!m_local_state.ConfigureContext(config.id))
+         return(false);
       return(true);
      }
 
@@ -141,6 +159,40 @@ public:
              manager.Register(m_market_selection,m_config.id,m_local_state,RUNMODE_TICK));
      }
 
+   //--- Attaches context-local typed storage to the six unchanged Task029
+   //--- calculation engines. Their DataBus identity is supplied at lifecycle
+   //--- dispatch time by EngineManager, not by handwritten keys in each engine.
+   bool              PrepareDecisionSafety(CCommonSnapshotStore &snapshot_store)
+     {
+      if(!m_available)
+         return(true);
+      if(m_decision_safety_prepared)
+         return(true);
+      if(!m_standby.SetSnapshotStore(snapshot_store) ||
+         !m_risk.SetSnapshotStore(snapshot_store) ||
+         !m_confidence.SetSnapshotStore(snapshot_store) ||
+         !m_decision_score.SetSnapshotStore(snapshot_store))
+         return(false);
+      m_decision_safety_prepared=true;
+      return(true);
+     }
+
+   //--- Formal local order: Style -> Strategy -> Standby -> Risk ->
+   //--- Confidence -> Decision. All writes remain context-only.
+   bool              RegisterDecisionSafety(CEngineManager &manager)
+     {
+      if(!m_available)
+         return(true);
+      if(!m_decision_safety_prepared)
+         return(false);
+      return(manager.RegisterContextDataView(m_trading_style,m_config.id,m_local_state) &&
+             manager.RegisterContextDataView(m_strategy_selection,m_config.id,m_local_state) &&
+             manager.RegisterContextDataView(m_standby,m_config.id,m_local_state) &&
+             manager.RegisterContextDataView(m_risk,m_config.id,m_local_state) &&
+             manager.RegisterContextDataView(m_confidence,m_config.id,m_local_state) &&
+             manager.RegisterContextDataView(m_decision_score,m_config.id,m_local_state));
+     }
+
    SRuntimeContextConfig Config(void)
      {
       return(m_config);
@@ -169,6 +221,17 @@ public:
    bool              IsAnalysisPrepared(void)
      {
       return(m_analysis_prepared);
+     }
+
+   bool              IsDecisionSafetyPrepared(void)
+     {
+      return(m_decision_safety_prepared);
+     }
+
+   int               DecisionSafetyEngineCount(void)
+     {
+      return(m_decision_safety_prepared ?
+             FENX_DECISION_SAFETY_ENGINES_PER_CONTEXT : 0);
      }
 
    int               AnalysisEngineCount(void)
@@ -203,6 +266,11 @@ private:
    bool            m_initialized;
    bool            m_analysis_prepared;
    bool            m_analysis_registered;
+   bool            m_decision_safety_prepared;
+   bool            m_decision_safety_registered;
+   CCommonSnapshotStore m_decision_snapshot_store;
+   CGlobalRiskAggregateStore m_global_risk_aggregate_store;
+   CGlobalRiskAggregateEngine m_global_risk_aggregate_engine;
 
    bool              BrokerContextAvailable(const SRuntimeContextConfig &config)
      {
@@ -225,6 +293,8 @@ public:
       m_initialized=false;
       m_analysis_prepared=false;
       m_analysis_registered=false;
+      m_decision_safety_prepared=false;
+      m_decision_safety_registered=false;
      }
 
    //--- Pure preflight: identity/policy validation is kept separate from
@@ -369,6 +439,44 @@ public:
       return(true);
      }
 
+   //--- Prepares a dedicated context decision store. Keeping it separate from
+   //--- the legacy Common store prevents the unchanged four-symbol Primary
+   //--- compatibility engines from overwriting context-local observations.
+   bool              PrepareDecisionSafety(
+                        CGlobalPortfolioSnapshotStore &portfolio_store)
+     {
+      if(!m_initialized || !m_analysis_prepared)
+         return(false);
+      if(m_decision_safety_prepared)
+         return(true);
+      m_decision_snapshot_store.Clear();
+      m_global_risk_aggregate_store.Clear();
+      for(int index=0;index<ArraySize(m_contexts);index++)
+         if(!m_contexts[index].PrepareDecisionSafety(m_decision_snapshot_store))
+            return(false);
+
+      SPortfolioContextDefinition definitions[];
+      if(!ExportPortfolioDefinitions(definitions) ||
+         !m_global_risk_aggregate_engine.Configure(
+            portfolio_store,m_global_risk_aggregate_store,definitions))
+         return(false);
+      m_decision_safety_prepared=true;
+      return(true);
+     }
+
+   bool              RegisterDecisionSafety(CEngineManager &manager)
+     {
+      if(!m_decision_safety_prepared || m_decision_safety_registered)
+         return(false);
+      for(int index=0;index<ArraySize(m_contexts);index++)
+         if(!m_contexts[index].RegisterDecisionSafety(manager))
+            return(false);
+      if(!manager.Register(m_global_risk_aggregate_engine,RUNMODE_TICK))
+         return(false);
+      m_decision_safety_registered=true;
+      return(true);
+     }
+
    //--- Production path. Broker discovery and selection are isolated here;
    //--- required failures stop initialization while optional failures remain
    //--- represented as unavailable contexts.
@@ -436,6 +544,10 @@ public:
       m_initialized=false;
       m_analysis_prepared=false;
       m_analysis_registered=false;
+      m_decision_safety_prepared=false;
+      m_decision_safety_registered=false;
+      m_decision_snapshot_store.Clear();
+      m_global_risk_aggregate_store.Clear();
      }
 
    int               Count(void)
@@ -484,6 +596,8 @@ public:
 
    bool              IsAnalysisPrepared(void) { return(m_analysis_prepared); }
    bool              IsAnalysisRegistered(void) { return(m_analysis_registered); }
+   bool              IsDecisionSafetyPrepared(void) { return(m_decision_safety_prepared); }
+   bool              IsDecisionSafetyRegistered(void) { return(m_decision_safety_registered); }
 
    int               AvailableContextCount(void)
      {
@@ -499,6 +613,29 @@ public:
       for(int index=0;index<ArraySize(m_contexts);index++)
          count+=m_contexts[index].AnalysisEngineCount();
       return(count);
+     }
+
+   int               DecisionSafetyEngineCount(void)
+     {
+      int count=0;
+      for(int index=0;index<ArraySize(m_contexts);index++)
+         count+=m_contexts[index].DecisionSafetyEngineCount();
+      return(count);
+     }
+
+   CCommonSnapshotStore *DecisionSnapshotStore(void)
+     {
+      return(GetPointer(m_decision_snapshot_store));
+     }
+
+   CGlobalRiskAggregateStore *GlobalRiskAggregateStore(void)
+     {
+      return(GetPointer(m_global_risk_aggregate_store));
+     }
+
+   CGlobalRiskAggregateEngine *GlobalRiskAggregateEngine(void)
+     {
+      return(GetPointer(m_global_risk_aggregate_engine));
      }
 
    //--- Exports read-only value metadata for the global shadow portfolio.

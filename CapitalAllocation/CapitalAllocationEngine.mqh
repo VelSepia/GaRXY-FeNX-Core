@@ -531,6 +531,144 @@ private:
       return(true);
      }
 
+   //--- Publishes the completed Task028 shadow result into canonical context
+   //--- keys for Task029 consumers. Legacy Pair Ranking and Allocation keys
+   //--- are never written here; they remain owned by the unchanged path below.
+   bool PublishContextPortfolio(const SGlobalPortfolioSnapshot &portfolio,
+                                SPortfolioCandidateSnapshot &audits[])
+     {
+      if(m_data_bus==NULL)
+         return(false);
+
+      string top_ranked_symbol="";
+      double top_ranking_score=0.0;
+      int top_allocated_index=-1;
+      for(int index=0;index<ArraySize(audits);index++)
+        {
+         if(audits[index].rank==1)
+           {
+            top_ranked_symbol=audits[index].context_id.symbol;
+            top_ranking_score=audits[index].ranking_score;
+           }
+         if(!audits[index].is_allocated)
+            continue;
+         if(top_allocated_index<0 ||
+            audits[index].allocation_score>
+               audits[top_allocated_index].allocation_score+
+               FENX_PAIR_RANKING_COMPARE_EPSILON ||
+            (MathAbs(audits[index].allocation_score-
+                     audits[top_allocated_index].allocation_score)<=
+               FENX_PAIR_RANKING_COMPARE_EPSILON &&
+             (audits[index].allocation_confidence>
+                audits[top_allocated_index].allocation_confidence+
+                FENX_PAIR_RANKING_COMPARE_EPSILON ||
+              (MathAbs(audits[index].allocation_confidence-
+                       audits[top_allocated_index].allocation_confidence)<=
+                 FENX_PAIR_RANKING_COMPARE_EPSILON &&
+               (audits[index].rank<audits[top_allocated_index].rank ||
+                (audits[index].rank==audits[top_allocated_index].rank &&
+                 StringCompare(audits[index].context_id.symbol,
+                               audits[top_allocated_index].context_id.symbol)<0))))))
+            top_allocated_index=index;
+        }
+      const string top_allocated_symbol=(top_allocated_index<0 ? "" :
+         audits[top_allocated_index].context_id.symbol);
+
+      bool success=true;
+      for(int index=0;index<ArraySize(audits);index++)
+        {
+         const SRuntimeContextId context_id=audits[index].context_id;
+         const string updated_at=TimeToString(portfolio.updated_at,
+                                               TIME_DATE|TIME_SECONDS);
+         //--- Legacy per-symbol records always carry the cycle timestamp even
+         //--- when the symbol is not ranked. Preserve that availability
+         //--- contract for an excluded/unfunded context as well.
+         const string ranking_updated_at=updated_at;
+         const string allocation_updated_at=TimeToString(
+            audits[index].allocation_updated_at,TIME_DATE|TIME_SECONDS);
+
+         if(!m_data_bus.SetContextText(
+               FENX_DATABUS_NAMESPACE_CONTEXT_PAIR_RANKING_GLOBAL,context_id,
+               "RankedSymbolCount",IntegerToString(portfolio.candidate_count))) success=false;
+         if(!m_data_bus.SetContextText(
+               FENX_DATABUS_NAMESPACE_CONTEXT_PAIR_RANKING_GLOBAL,context_id,
+               "TopRankedSymbol",top_ranked_symbol)) success=false;
+         if(!m_data_bus.SetContextText(
+               FENX_DATABUS_NAMESPACE_CONTEXT_PAIR_RANKING_GLOBAL,context_id,
+               "TopRankingScore",DoubleToString(top_ranking_score,2))) success=false;
+         if(!m_data_bus.SetContextText(
+               FENX_DATABUS_NAMESPACE_CONTEXT_PAIR_RANKING_GLOBAL,context_id,
+               "RankingDataValid",(portfolio.ranking_valid ? "true" : "false"))) success=false;
+         if(!m_data_bus.SetContextText(
+               FENX_DATABUS_NAMESPACE_CONTEXT_PAIR_RANKING_GLOBAL,context_id,
+               "RankingUpdatedAt",updated_at)) success=false;
+
+         if(!m_data_bus.SetContextText(FENX_DATABUS_NAMESPACE_PAIR_RANKING,context_id,
+               FENX_DATABUS_FIELD_PAIR_RANKING_SYMBOL,
+               audits[index].context_id.symbol)) success=false;
+         if(!m_data_bus.SetContextText(FENX_DATABUS_NAMESPACE_PAIR_RANKING,context_id,
+               FENX_DATABUS_FIELD_PAIR_RANKING_RANK,
+               IntegerToString(audits[index].rank))) success=false;
+         if(!m_data_bus.SetContextText(FENX_DATABUS_NAMESPACE_PAIR_RANKING,context_id,
+               FENX_DATABUS_FIELD_PAIR_RANKING_SCORE,
+               DoubleToString(audits[index].ranking_score,2))) success=false;
+         if(!m_data_bus.SetContextText(FENX_DATABUS_NAMESPACE_PAIR_RANKING,context_id,
+               FENX_DATABUS_FIELD_PAIR_RANKING_CONFIDENCE,
+               DoubleToString(audits[index].ranking_confidence,2))) success=false;
+         if(!m_data_bus.SetContextText(FENX_DATABUS_NAMESPACE_PAIR_RANKING,context_id,
+               FENX_DATABUS_FIELD_PAIR_RANKING_IS_RANKED,
+               (audits[index].is_ranked ? "true" : "false"))) success=false;
+         if(!m_data_bus.SetContextText(FENX_DATABUS_NAMESPACE_PAIR_RANKING,context_id,
+               FENX_DATABUS_FIELD_PAIR_RANKING_REASON,audits[index].reason)) success=false;
+         if(!m_data_bus.SetContextText(FENX_DATABUS_NAMESPACE_PAIR_RANKING,context_id,
+               FENX_DATABUS_FIELD_PAIR_RANKING_UPDATED_AT,
+               ranking_updated_at)) success=false;
+
+         if(!m_data_bus.SetContextText(
+               FENX_DATABUS_NAMESPACE_CONTEXT_CAPITAL_ALLOCATION_GLOBAL,context_id,
+               "AllocatedSymbolCount",IntegerToString(portfolio.allocated_count))) success=false;
+         if(!m_data_bus.SetContextText(
+               FENX_DATABUS_NAMESPACE_CONTEXT_CAPITAL_ALLOCATION_GLOBAL,context_id,
+               "TotalAllocatedPercent",DoubleToString(portfolio.total_allocation,2))) success=false;
+         if(!m_data_bus.SetContextText(
+               FENX_DATABUS_NAMESPACE_CONTEXT_CAPITAL_ALLOCATION_GLOBAL,context_id,
+               "UnallocatedPercent",DoubleToString(
+                  MathMax(0.0,100.0-portfolio.total_allocation),2))) success=false;
+         if(!m_data_bus.SetContextText(
+               FENX_DATABUS_NAMESPACE_CONTEXT_CAPITAL_ALLOCATION_GLOBAL,context_id,
+               "TopAllocatedSymbol",top_allocated_symbol)) success=false;
+         if(!m_data_bus.SetContextText(
+               FENX_DATABUS_NAMESPACE_CONTEXT_CAPITAL_ALLOCATION_GLOBAL,context_id,
+               "AllocationDataValid",(portfolio.allocation_valid ? "true" : "false"))) success=false;
+         if(!m_data_bus.SetContextText(
+               FENX_DATABUS_NAMESPACE_CONTEXT_CAPITAL_ALLOCATION_GLOBAL,context_id,
+               "AllocationUpdatedAt",updated_at)) success=false;
+
+         if(!m_data_bus.SetContextText(FENX_DATABUS_NAMESPACE_CAPITAL_ALLOCATION,
+               context_id,FENX_DATABUS_FIELD_CAPITAL_ALLOCATION_SYMBOL,
+               audits[index].context_id.symbol)) success=false;
+         if(!m_data_bus.SetContextText(FENX_DATABUS_NAMESPACE_CAPITAL_ALLOCATION,
+               context_id,FENX_DATABUS_FIELD_CAPITAL_ALLOCATION_IS_ALLOCATED,
+               (audits[index].is_allocated ? "true" : "false"))) success=false;
+         if(!m_data_bus.SetContextText(FENX_DATABUS_NAMESPACE_CAPITAL_ALLOCATION,
+               context_id,FENX_DATABUS_FIELD_CAPITAL_ALLOCATION_PERCENT,
+               DoubleToString(audits[index].allocation_percent,2))) success=false;
+         if(!m_data_bus.SetContextText(FENX_DATABUS_NAMESPACE_CAPITAL_ALLOCATION,
+               context_id,FENX_DATABUS_FIELD_CAPITAL_ALLOCATION_SCORE,
+               DoubleToString(audits[index].allocation_score,2))) success=false;
+         if(!m_data_bus.SetContextText(FENX_DATABUS_NAMESPACE_CAPITAL_ALLOCATION,
+               context_id,FENX_DATABUS_FIELD_CAPITAL_ALLOCATION_CONFIDENCE,
+               DoubleToString(audits[index].allocation_confidence,2))) success=false;
+         if(!m_data_bus.SetContextText(FENX_DATABUS_NAMESPACE_CAPITAL_ALLOCATION,
+               context_id,FENX_DATABUS_FIELD_CAPITAL_ALLOCATION_REASON,
+               audits[index].reason)) success=false;
+         if(!m_data_bus.SetContextText(FENX_DATABUS_NAMESPACE_CAPITAL_ALLOCATION,
+               context_id,FENX_DATABUS_FIELD_CAPITAL_ALLOCATION_UPDATED_AT,
+               allocation_updated_at)) success=false;
+        }
+      return(success);
+     }
+
    //--- Completes the pending shadow ranking with the existing allocation
    //--- score, threshold, sort, cap, and redistribution contract. Results stay
    //--- in the typed portfolio store and cannot enable secondary execution.
@@ -665,7 +803,9 @@ private:
                                   all_candidate_data_valid);
       portfolio.allocation_runtime_microseconds=
          (long)(GetMicrosecondCount()-started);
-      m_portfolio_store.CompleteAllocation(portfolio,audits);
+      if(!m_portfolio_store.CompleteAllocation(portfolio,audits) ||
+         !PublishContextPortfolio(portfolio,audits))
+         CLogger::Error("CapitalAllocationEngine could not publish the context portfolio contract.");
      }
 
 public:

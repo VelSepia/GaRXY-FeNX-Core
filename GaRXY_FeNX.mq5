@@ -139,6 +139,11 @@ int OnInit()
       CLogger::Error("Unable to configure the shadow Global Portfolio layer.");
       return(INIT_FAILED);
      }
+   if(!g_controller.PrepareRuntimeContextDecisionSafety(g_global_portfolio_store))
+     {
+      CLogger::Error("Unable to prepare context decision/safety pipelines.");
+      return(INIT_FAILED);
+     }
    if(!g_standby_engine.SetSnapshotStore(g_common_snapshot_store))
      {
       CLogger::Error("Unable to attach CommonSnapshotStore to StandbyEngine.");
@@ -190,6 +195,14 @@ int OnInit()
    if(!g_controller.RegisterEngine(g_capital_allocation_engine))
      {
       CLogger::Error("Unable to register CapitalAllocationEngine.");
+      return(INIT_FAILED);
+     }
+
+   //--- Context-local decision/safety runs after the completed global
+   //--- portfolio and before the unchanged Primary legacy downstream.
+   if(!g_controller.RegisterRuntimeContextDecisionSafetyEngines())
+     {
+      CLogger::Error("Unable to register context decision/safety pipelines.");
       return(INIT_FAILED);
      }
 
@@ -290,6 +303,40 @@ void OnTradeTransaction(const MqlTradeTransaction &transaction,
 //+------------------------------------------------------------------+
 double OnTester(void)
   {
+   CRuntimeContextRegistry *registry=g_controller.RuntimeContexts();
+   CDataBus *data_bus=g_controller.DataBus();
+   CEngineManager *engines=g_controller.Engines();
+   SGlobalRiskAggregateSnapshot aggregate;
+   ResetGlobalRiskAggregateSnapshot(aggregate);
+   bool aggregate_available=false;
+   int context_snapshots=0;
+   if(registry!=NULL)
+     {
+      CGlobalRiskAggregateStore *aggregate_store=
+         registry.GlobalRiskAggregateStore();
+      CCommonSnapshotStore *context_store=registry.DecisionSnapshotStore();
+      aggregate_available=(aggregate_store!=NULL &&
+                           aggregate_store.GetLatest(aggregate));
+      if(context_store!=NULL)
+         context_snapshots=context_store.StandbySnapshotCount()+
+                           context_store.RiskSnapshotCount()+
+                           context_store.ConfidenceSnapshotCount()+
+                           context_store.DecisionScoreSnapshotCount();
+     }
+   CLogger::Info(StringFormat(
+      "[TASK029_SUMMARY] Result=%s;Contexts=%d;Engines=%d;DataBus=%d;Remaining=%d;Spare=%.2f;ContextSnapshots=%d;AggregateSequence=%I64d;Active=%d;Standby=%d;RiskStopped=%d;Critical=%d;Invalid=%d;PortfolioLinkage=%d;FutureSource=%d;WrongContext=%d;AggregateRuntimeUs=%I64d;SecondaryEntry=0;SecondaryExit=0;SecondaryExecution=0;SecondaryOrder=0;SecondaryPosition=0",
+      (aggregate_available && aggregate.is_valid ? "PASS" : "FAIL"),
+      (registry==NULL ? 0 : registry.AvailableContextCount()),
+      (engines==NULL ? 0 : engines.Count()),
+      (data_bus==NULL ? 0 : data_bus.Count()),
+      (data_bus==NULL ? 0 : data_bus.RemainingCapacity()),
+      (data_bus==NULL ? 0.0 :
+       100.0*data_bus.RemainingCapacity()/data_bus.Capacity()),
+      context_snapshots,aggregate.evaluation_sequence,aggregate.active_count,
+      aggregate.standby_count,aggregate.risk_stopped_count,
+      aggregate.critical_context_count,aggregate.invalid_context_count,
+      aggregate.portfolio_linkage_error_count,aggregate.future_source_count,
+      aggregate.wrong_context_count,aggregate.runtime_microseconds));
    return(FenxReportBacktestValidation(InpExecutionSymbol,
                                        InpExecutionMagicNumber));
   }

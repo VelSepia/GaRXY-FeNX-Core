@@ -19,6 +19,128 @@ private:
    bool              m_legacy_fallback_read_enabled;
    long              m_legacy_alias_write_count;
    long              m_legacy_fallback_read_count;
+   bool              m_context_view_active;
+   SRuntimeContextId m_context_view_id;
+   long              m_context_view_wrong_symbol_count;
+
+   bool RawSetText(const string key,const string value)
+     {
+      if(StringLen(key)==0)
+        {
+         CLogger::Warning("DataBus rejected an empty key.");
+         return(false);
+        }
+
+      int index=FindIndex(key);
+      if(index<0)
+        {
+         const int item_count=ArraySize(m_items);
+         if(item_count>=Capacity())
+           {
+            CLogger::Error("DataBus capacity has been reached.");
+            return(false);
+           }
+         if(ArrayResize(m_items,item_count+1)!=(item_count+1))
+           {
+            CLogger::Error("DataBus could not allocate a new entry.");
+            return(false);
+           }
+         index=item_count;
+         m_items[index].key=key;
+        }
+
+      m_items[index].value=value;
+      m_items[index].updated_at=TimeCurrent();
+      return(true);
+     }
+
+   bool RawTryGetText(const string key,string &value)
+     {
+      const int index=FindIndex(key);
+      if(index<0)
+         return(false);
+      value=m_items[index].value;
+      return(true);
+     }
+
+   //--- Maps only the established global keys consumed/published by the six
+   //--- Task029 engines. Per-symbol APIs are handled separately and canonical
+   //--- context keys always bypass this compatibility translation.
+   bool MapContextGlobalKey(const string key,string &name_space,string &field)
+     {
+      string prefix="";
+      if(StringFind(key,"Environment.Volatility.")==0)
+        {
+         name_space=FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY;
+         prefix="Environment.Volatility.";
+        }
+      else if(StringFind(key,"Environment.Range.")==0)
+        {
+         name_space=FENX_DATABUS_NAMESPACE_CONTEXT_RANGE;
+         prefix="Environment.Range.";
+        }
+      else if(StringFind(key,"Environment.Trend.")==0)
+        {
+         name_space=FENX_DATABUS_NAMESPACE_CONTEXT_TREND;
+         prefix="Environment.Trend.";
+        }
+      else if(StringFind(key,"Environment.Market.")==0)
+        {
+         name_space=FENX_DATABUS_NAMESPACE_CONTEXT_MARKET;
+         prefix="Environment.Market.";
+        }
+      else if(StringFind(key,"PairRanking.")==0)
+        {
+         name_space=FENX_DATABUS_NAMESPACE_CONTEXT_PAIR_RANKING_GLOBAL;
+         prefix="PairRanking.";
+        }
+      else if(StringFind(key,"CapitalAllocation.")==0)
+        {
+         name_space=FENX_DATABUS_NAMESPACE_CONTEXT_CAPITAL_ALLOCATION_GLOBAL;
+         prefix="CapitalAllocation.";
+        }
+      else if(StringFind(key,"TradingStyle.")==0)
+        {
+         name_space=FENX_DATABUS_NAMESPACE_CONTEXT_TRADING_STYLE_GLOBAL;
+         prefix="TradingStyle.";
+        }
+      else if(StringFind(key,"StrategySelection.")==0)
+        {
+         name_space=FENX_DATABUS_NAMESPACE_CONTEXT_STRATEGY_SELECTION_GLOBAL;
+         prefix="StrategySelection.";
+        }
+      else if(StringFind(key,"Standby.")==0)
+        {
+         name_space=FENX_DATABUS_NAMESPACE_CONTEXT_STANDBY_GLOBAL;
+         prefix="Standby.";
+        }
+      else if(StringFind(key,"Risk.")==0)
+        {
+         name_space=FENX_DATABUS_NAMESPACE_CONTEXT_RISK_GLOBAL;
+         prefix="Risk.";
+        }
+      else
+         return(false);
+
+      field=StringSubstr(key,StringLen(prefix));
+      return(StringLen(field)>0);
+     }
+
+   bool RawSetContextText(const string name_space,
+                          const SRuntimeContextId &context_id,
+                          const string field,const string value)
+     {
+      const string key=BuildContextKey(name_space,context_id,field);
+      return(StringLen(key)>0 && RawSetText(key,value));
+     }
+
+   bool RawTryGetContextText(const string name_space,
+                             const SRuntimeContextId &context_id,
+                             const string field,string &value)
+     {
+      const string key=BuildContextKey(name_space,context_id,field);
+      return(StringLen(key)>0 && RawTryGetText(key,value));
+     }
 
    int FindIndex(const string key)
      {
@@ -90,6 +212,10 @@ public:
       m_legacy_fallback_read_enabled=false;
       m_legacy_alias_write_count=0;
       m_legacy_fallback_read_count=0;
+      m_context_view_active=false;
+      m_context_view_id.symbol="";
+      m_context_view_id.timeframe=PERIOD_CURRENT;
+      m_context_view_wrong_symbol_count=0;
      }
 
    //--- Produces the canonical namespace.symbol.timeframe.field identity.
@@ -163,50 +289,40 @@ public:
 
    bool SetText(const string key,const string value)
      {
-      if(StringLen(key)==0)
+      if(m_context_view_active)
         {
-         CLogger::Warning("DataBus rejected an empty key.");
-         return(false);
+         string name_space="";
+         string field="";
+         if(MapContextGlobalKey(key,name_space,field))
+            return(RawSetContextText(name_space,m_context_view_id,field,value));
         }
-
-      int index=FindIndex(key);
-      if(index<0)
-        {
-         const int item_count=ArraySize(m_items);
-         if(item_count>=Capacity())
-           {
-            CLogger::Error("DataBus capacity has been reached.");
-            return(false);
-           }
-
-         if(ArrayResize(m_items,item_count+1)!=(item_count+1))
-           {
-            CLogger::Error("DataBus could not allocate a new entry.");
-            return(false);
-           }
-
-         index=item_count;
-         m_items[index].key=key;
-        }
-
-      m_items[index].value=value;
-      m_items[index].updated_at=TimeCurrent();
-      return(true);
+      return(RawSetText(key,value));
      }
 
    bool TryGetText(const string key,string &value)
      {
-      const int index=FindIndex(key);
-      if(index<0)
-         return(false);
-
-      value=m_items[index].value;
-      return(true);
+      if(m_context_view_active)
+        {
+         string name_space="";
+         string field="";
+         if(MapContextGlobalKey(key,name_space,field))
+            return(RawTryGetContextText(name_space,m_context_view_id,field,value));
+        }
+      return(RawTryGetText(key,value));
      }
 
    bool SetSymbolText(const string name_space,const string symbol,const string field,
                       const string value)
      {
+      if(m_context_view_active)
+        {
+         if(symbol!=m_context_view_id.symbol)
+           {
+            m_context_view_wrong_symbol_count++;
+            return(false);
+           }
+         return(RawSetContextText(name_space,m_context_view_id,field,value));
+        }
       const string key=BuildSymbolKey(name_space,symbol,field);
       if(StringLen(key)==0)
         {
@@ -214,17 +330,60 @@ public:
          return(false);
         }
 
-      return(SetText(key,value));
+      return(RawSetText(key,value));
      }
 
    bool TryGetSymbolText(const string name_space,const string symbol,const string field,
                          string &value)
      {
+      if(m_context_view_active)
+        {
+         if(symbol!=m_context_view_id.symbol)
+           {
+            m_context_view_wrong_symbol_count++;
+            return(false);
+           }
+         return(RawTryGetContextText(name_space,m_context_view_id,field,value));
+        }
       const string key=BuildSymbolKey(name_space,symbol,field);
       if(StringLen(key)==0)
          return(false);
 
-      return(TryGetText(key,value));
+      return(RawTryGetText(key,value));
+     }
+
+   //--- EngineManager activates this view only for Task029 context instances.
+   //--- It is deliberately non-nestable so an early lifecycle error cannot
+   //--- silently redirect a following legacy engine.
+   bool BeginContextView(const SRuntimeContextId &context_id)
+     {
+      if(m_context_view_active || !IsValidRuntimeContextId(context_id))
+         return(false);
+      m_context_view_id=context_id;
+      m_context_view_active=true;
+      return(true);
+     }
+
+   void EndContextView(void)
+     {
+      m_context_view_active=false;
+      m_context_view_id.symbol="";
+      m_context_view_id.timeframe=PERIOD_CURRENT;
+     }
+
+   bool ContextViewActive(void) { return(m_context_view_active); }
+
+   bool GetActiveContextId(SRuntimeContextId &context_id)
+     {
+      if(!m_context_view_active)
+         return(false);
+      context_id=m_context_view_id;
+      return(true);
+     }
+
+   long ContextViewWrongSymbolCount(void)
+     {
+      return(m_context_view_wrong_symbol_count);
      }
 
    //--- Stores a canonical context value and, only for the configured primary
@@ -249,11 +408,11 @@ public:
          return(false);
         }
 
-      if(!SetText(context_key,value))
+      if(!RawSetText(context_key,value))
          return(false);
       if(write_legacy)
         {
-         if(!SetText(legacy_key,value))
+         if(!RawSetText(legacy_key,value))
             return(false);
          m_legacy_alias_write_count++;
         }
@@ -268,7 +427,7 @@ public:
       const string context_key=BuildContextKey(name_space,context_id,field);
       if(StringLen(context_key)==0)
          return(false);
-      if(TryGetText(context_key,value))
+      if(RawTryGetText(context_key,value))
          return(true);
 
       if(!m_legacy_fallback_read_enabled || !IsPrimaryContext(context_id))
@@ -424,6 +583,10 @@ public:
       ArrayFree(m_items);
       m_legacy_alias_write_count=0;
       m_legacy_fallback_read_count=0;
+      m_context_view_active=false;
+      m_context_view_id.symbol="";
+      m_context_view_id.timeframe=PERIOD_CURRENT;
+      m_context_view_wrong_symbol_count=0;
      }
   };
 

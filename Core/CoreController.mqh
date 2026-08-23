@@ -21,12 +21,14 @@ private:
    CRuntimeContextRegistry m_runtime_context_registry;
    bool           m_initialized;
    bool           m_runtime_contexts_prepared;
+   bool           m_runtime_decision_safety_prepared;
 
 public:
                      CCoreController(void)
      {
       m_initialized=false;
       m_runtime_contexts_prepared=false;
+      m_runtime_decision_safety_prepared=false;
      }
 
    //--- Creates context-owned analysis instances before registration. The
@@ -86,6 +88,20 @@ public:
       return(true);
      }
 
+   bool              PrepareRuntimeContextDecisionSafety(
+                        CGlobalPortfolioSnapshotStore &portfolio_store)
+     {
+      if(m_initialized || !m_runtime_contexts_prepared)
+         return(false);
+      if(m_runtime_decision_safety_prepared)
+         return(true);
+      if(!m_runtime_context_registry.PrepareDecisionSafety(portfolio_store))
+         return(false);
+
+      m_runtime_decision_safety_prepared=true;
+      return(true);
+     }
+
    //--- Must be called before global portfolio/downstream registration so all
    //--- context analysis pipelines complete first on every scheduler tick.
    bool              RegisterRuntimeContextAnalysisEngines(void)
@@ -93,6 +109,13 @@ public:
       if(!m_runtime_contexts_prepared || m_initialized)
          return(false);
       return(m_runtime_context_registry.RegisterAnalysis(m_engine_manager));
+     }
+
+   bool              RegisterRuntimeContextDecisionSafetyEngines(void)
+     {
+      if(!m_runtime_decision_safety_prepared || m_initialized)
+         return(false);
+      return(m_runtime_context_registry.RegisterDecisionSafety(m_engine_manager));
      }
 
    bool              Initialize(CParameterManager &parameters)
@@ -120,9 +143,18 @@ public:
          FENX_COMMON_CONFIDENCE_GLOBAL_KEY_COUNT+
          FENX_COMMON_DECISION_GLOBAL_KEY_COUNT+
          (FENX_COMMON_CONFIDENCE_PER_SYMBOL_KEY_COUNT+
-          FENX_COMMON_DECISION_PER_SYMBOL_KEY_COUNT)*configured_symbols;
+          FENX_COMMON_DECISION_PER_SYMBOL_KEY_COUNT)*configured_symbols+
+         (m_runtime_contexts_prepared ?
+          FENX_ANALYSIS_CONTEXT_KEY_COUNT*
+             m_runtime_context_registry.AvailableContextCount() : 0)+
+         (m_runtime_decision_safety_prepared ?
+          FENX_DECISION_SAFETY_CONTEXT_KEY_COUNT*
+             m_runtime_context_registry.AvailableContextCount() : 0);
+      const int maximum_safe_entries=(int)MathFloor(
+         FENX_DATABUS_CAPACITY*(1.0-FENX_DATABUS_MINIMUM_SPARE_RATIO));
       SRuntimeContextPreflight runtime_preflight;
-      if(!m_runtime_context_registry.ValidateCapacityPreflight(
+      if(estimated_databus_entries>maximum_safe_entries ||
+         !m_runtime_context_registry.ValidateCapacityPreflight(
             estimated_databus_entries,m_engine_manager.Count(),runtime_preflight))
         {
          m_runtime_context_registry.Clear();
@@ -182,6 +214,7 @@ public:
       m_data_bus.Clear();
       m_initialized=false;
       m_runtime_contexts_prepared=false;
+      m_runtime_decision_safety_prepared=false;
       CLogger::Info("CoreController shut down.");
      }
 

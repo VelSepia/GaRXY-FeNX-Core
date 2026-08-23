@@ -22,6 +22,8 @@
 //--- publish 67 canonical context keys in total (3+10+9+5+32+8). Primary
 //--- compatibility keys are additional migration aliases and remain unchanged.
 #define FENX_ANALYSIS_ENGINES_PER_CONTEXT          6
+#define FENX_DECISION_SAFETY_ENGINES_PER_CONTEXT   6
+#define FENX_DECISION_SAFETY_CONTEXT_KEY_COUNT     116
 #define FENX_ANALYSIS_CONTEXT_KEY_COUNT            67
 #define FENX_DATABUS_MINIMUM_SPARE_RATIO           0.30
 
@@ -32,6 +34,15 @@
 #define FENX_DATABUS_NAMESPACE_CONTEXT_RANGE       "EnvironmentRange"
 #define FENX_DATABUS_NAMESPACE_CONTEXT_TREND       "EnvironmentTrend"
 #define FENX_DATABUS_NAMESPACE_CONTEXT_MARKET      "EnvironmentMarket"
+//--- Context-local views of legacy global summaries. Separate namespaces
+//--- prevent fields such as RankingUpdatedAt from colliding with the existing
+//--- per-context candidate fields in PairRanking/CapitalAllocation.
+#define FENX_DATABUS_NAMESPACE_CONTEXT_PAIR_RANKING_GLOBAL       "ContextPairRankingGlobal"
+#define FENX_DATABUS_NAMESPACE_CONTEXT_CAPITAL_ALLOCATION_GLOBAL "ContextCapitalAllocationGlobal"
+#define FENX_DATABUS_NAMESPACE_CONTEXT_TRADING_STYLE_GLOBAL      "ContextTradingStyleGlobal"
+#define FENX_DATABUS_NAMESPACE_CONTEXT_STRATEGY_SELECTION_GLOBAL "ContextStrategySelectionGlobal"
+#define FENX_DATABUS_NAMESPACE_CONTEXT_STANDBY_GLOBAL            "ContextStandbyGlobal"
+#define FENX_DATABUS_NAMESPACE_CONTEXT_RISK_GLOBAL               "ContextRiskGlobal"
 
 //--- Environment Engine DataBus keys
 #define FENX_DATABUS_KEY_ENVIRONMENT_ATR               "Environment.Volatility.ATR"

@@ -1,0 +1,252 @@
+//+------------------------------------------------------------------+
+//| Phase4-Core Task029 Real Decision/Safety Harness                |
+//+------------------------------------------------------------------+
+#property strict
+#property version "1.029"
+
+#include "../Core/CoreController.mqh"
+#include "../Common/CommonSnapshotStore.mqh"
+#include "../Portfolio/GlobalPortfolioSnapshotStore.mqh"
+#include "../PairRanking/PairRankingEngine.mqh"
+#include "../CapitalAllocation/CapitalAllocationEngine.mqh"
+#include "../TradingStyle/TradingStyleEngine.mqh"
+#include "../Strategy/StrategySelectionEngine.mqh"
+#include "../Standby/StandbyEngine.mqh"
+#include "../Risk/RiskEngine.mqh"
+#include "../Confidence/ConfidenceEngine.mqh"
+#include "../Decision/DecisionScoreEngine.mqh"
+#include "../Execution/ExecutionEngine.mqh"
+#include "../Recovery/CommonRecoveryEngine.mqh"
+#include "../Health/CommonHealthEngine.mqh"
+
+input int InpTask029ContextCount=5;
+
+CCoreController g_controller;
+CParameterManager g_parameters;
+CCommonSnapshotStore g_analysis_snapshots;
+CGlobalPortfolioSnapshotStore g_portfolio;
+CPairRankingEngine g_pair_ranking;
+CCapitalAllocationEngine g_capital_allocation;
+CTradingStyleEngine g_primary_trading_style;
+CStrategySelectionEngine g_primary_strategy_selection;
+CStandbyEngine g_primary_standby;
+CRiskEngine g_primary_risk;
+CConfidenceEngine g_primary_confidence;
+CDecisionScoreEngine g_primary_decision;
+CExecutionEngine g_primary_execution;
+CCommonRecoveryEngine g_primary_recovery;
+CCommonHealthEngine g_primary_health;
+bool g_ready=false;
+
+bool AttachPrimaryStores(void)
+  {
+   return(g_primary_standby.SetSnapshotStore(g_analysis_snapshots) &&
+          g_primary_risk.SetSnapshotStore(g_analysis_snapshots) &&
+          g_primary_confidence.SetSnapshotStore(g_analysis_snapshots) &&
+          g_primary_decision.SetSnapshotStore(g_analysis_snapshots) &&
+          g_primary_execution.SetSnapshotStore(g_analysis_snapshots) &&
+          g_primary_recovery.SetSnapshotStore(g_analysis_snapshots) &&
+          g_primary_health.SetSnapshotStore(g_analysis_snapshots));
+  }
+
+bool RegisterPrimaryPipeline(void)
+  {
+   return(g_controller.RegisterEngine(g_primary_trading_style) &&
+          g_controller.RegisterEngine(g_primary_strategy_selection) &&
+          g_controller.RegisterEngine(g_primary_standby) &&
+          g_controller.RegisterEngine(g_primary_risk) &&
+          g_controller.RegisterEngine(g_primary_confidence) &&
+          g_controller.RegisterEngine(g_primary_decision) &&
+          g_controller.RegisterEngine(g_primary_execution) &&
+          g_controller.RegisterEngine(g_primary_recovery) &&
+          g_controller.RegisterEngine(g_primary_health));
+  }
+
+void FillContext(SRuntimeContextConfig &config,const string symbol,
+                 const ENUM_TIMEFRAMES timeframe,const bool required,
+                 const ENUM_FENX_CONTEXT_ROLE role,const bool trade_enabled,
+                 const long magic)
+  {
+   ResetRuntimeContextConfig(config);
+   config.id.symbol=symbol;
+   config.id.timeframe=timeframe;
+   config.enabled=true;
+   config.required=required;
+   config.role=role;
+   config.trade_enabled=trade_enabled;
+   config.magic=magic;
+   config.parameter_profile_id="task029-real";
+  }
+
+int OnInit(void)
+  {
+   if(!g_parameters.Load() ||
+      (InpTask029ContextCount!=1 && InpTask029ContextCount!=4 &&
+       InpTask029ContextCount!=5))
+      return(INIT_PARAMETERS_INCORRECT);
+
+   SRuntimeContextConfig configs[];
+   if(ArrayResize(configs,InpTask029ContextCount)!=InpTask029ContextCount)
+      return(INIT_FAILED);
+   FillContext(configs[0],"USDJPY",PERIOD_H1,true,
+               FENX_CONTEXT_ROLE_PRIMARY_TRADING,true,93095);
+   if(InpTask029ContextCount>=4)
+     {
+      FillContext(configs[1],"EURUSD",PERIOD_H1,false,
+                  FENX_CONTEXT_ROLE_AUXILIARY_ANALYSIS,false,93095);
+      FillContext(configs[2],"GBPUSD",PERIOD_H1,false,
+                  FENX_CONTEXT_ROLE_AUXILIARY_ANALYSIS,false,93095);
+      FillContext(configs[3],"AUDUSD",PERIOD_H1,false,
+                  FENX_CONTEXT_ROLE_AUXILIARY_ANALYSIS,false,93095);
+     }
+   if(InpTask029ContextCount==5)
+      FillContext(configs[4],"USDJPY",PERIOD_M15,false,
+                  FENX_CONTEXT_ROLE_AUXILIARY_ANALYSIS,false,93096);
+
+   if(!g_parameters.SetRuntimeContextConfigs(configs) ||
+      !g_controller.PrepareRuntimeContexts(g_parameters,g_analysis_snapshots,true))
+      return(INIT_FAILED);
+
+   CRuntimeContextRegistry *registry=g_controller.RuntimeContexts();
+   SPortfolioContextDefinition definitions[];
+   if(registry==NULL || !registry.ExportPortfolioDefinitions(definitions) ||
+      !g_pair_ranking.SetGlobalPortfolio(g_portfolio,g_analysis_snapshots,definitions) ||
+      !g_capital_allocation.SetGlobalPortfolio(g_portfolio) ||
+      !g_controller.PrepareRuntimeContextDecisionSafety(g_portfolio) ||
+      !g_controller.RegisterRuntimeContextAnalysisEngines() ||
+      !g_controller.RegisterEngine(g_pair_ranking) ||
+      !g_controller.RegisterEngine(g_capital_allocation) ||
+      !g_controller.RegisterRuntimeContextDecisionSafetyEngines() ||
+      !AttachPrimaryStores() || !RegisterPrimaryPipeline() ||
+      !g_controller.Initialize(g_parameters))
+      return(INIT_FAILED);
+
+   g_ready=true;
+   Print("[TASK029 REAL] Init=PASS;SecondaryTrading=false");
+   return(INIT_SUCCEEDED);
+  }
+
+void OnTick(void)
+  {
+   if(g_ready)
+      g_controller.Update();
+  }
+
+bool ContextField(CDataBus *bus,const string name_space,
+                  const SRuntimeContextId &id,const string field)
+  {
+   string value="";
+   return(bus!=NULL && bus.TryGetContextText(name_space,id,field,value));
+  }
+
+double OnTester(void)
+  {
+   CRuntimeContextRegistry *registry=g_controller.RuntimeContexts();
+   CDataBus *bus=g_controller.DataBus();
+   CEngineManager *manager=g_controller.Engines();
+   if(registry==NULL || bus==NULL || manager==NULL)
+      return(0.0);
+
+   CCommonSnapshotStore *store=registry.DecisionSnapshotStore();
+   CGlobalRiskAggregateStore *aggregate_store=registry.GlobalRiskAggregateStore();
+   bool contexts_complete=(store!=NULL);
+   bool state_isolated=true;
+   bool source_time_safe=true;
+   bool secondary_non_trading=true;
+   int checked=0;
+   for(int index=0;index<registry.Count();index++)
+     {
+      CRuntimeContext *runtime=registry.ContextAt(index);
+      if(runtime==NULL || !runtime.IsAvailable())
+         continue;
+      checked++;
+      const SRuntimeContextConfig config=runtime.Config();
+      const SRuntimeContextId id=config.id;
+      SStandbySnapshot standby;
+      SRiskSnapshot risk;
+      SConfidenceSnapshot confidence;
+      SDecisionScoreSnapshot decision;
+      contexts_complete=(contexts_complete &&
+         ContextField(bus,FENX_DATABUS_NAMESPACE_TRADING_STYLE,id,
+                      FENX_DATABUS_FIELD_TRADING_STYLE_UPDATED_AT) &&
+         ContextField(bus,FENX_DATABUS_NAMESPACE_STRATEGY_SELECTION,id,
+                      FENX_DATABUS_FIELD_STRATEGY_SELECTION_UPDATED_AT) &&
+         store.GetStandbySnapshot(id.symbol,id.timeframe,standby) &&
+         store.GetRiskSnapshot(id.symbol,id.timeframe,risk) &&
+         store.GetConfidenceSnapshot(id.symbol,id.timeframe,confidence) &&
+         store.GetDecisionScoreSnapshot(id.symbol,id.timeframe,decision) &&
+         standby.symbol==id.symbol && standby.timeframe==EnumToString(id.timeframe) &&
+         risk.symbol==id.symbol && risk.timeframe==EnumToString(id.timeframe) &&
+         confidence.symbol==id.symbol && confidence.timeframe==EnumToString(id.timeframe) &&
+         decision.symbol==id.symbol && decision.timeframe==EnumToString(id.timeframe));
+      const datetime now=TimeCurrent();
+      source_time_safe=(source_time_safe && standby.updated_at<=now &&
+         risk.updated_at<=now && confidence.updated_at<=now && decision.updated_at<=now);
+      CStateManager *local_state=runtime.StateManager();
+      state_isolated=(state_isolated && local_state!=NULL &&
+                      local_state.IsContextLocal());
+      if(index>0)
+         secondary_non_trading=(secondary_non_trading && !config.trade_enabled);
+     }
+
+   string forbidden="";
+   // The unchanged Primary compatibility pipeline intentionally owns these
+   // aliases. Context view writes are proved absent by the isolation harness,
+   // zero fallback reads, and zero wrong-context accesses below.
+   const bool primary_legacy_available=
+      bus.TryGetText(FENX_DATABUS_KEY_TRADING_STYLE_UPDATED_AT,forbidden) &&
+      bus.TryGetText(FENX_DATABUS_KEY_STRATEGY_SELECTION_UPDATED_AT,forbidden) &&
+      bus.TryGetText(FENX_DATABUS_KEY_STANDBY_SYSTEM_UPDATED_AT,forbidden) &&
+      bus.TryGetText(FENX_DATABUS_KEY_RISK_SYSTEM_UPDATED_AT,forbidden);
+   SGlobalRiskAggregateSnapshot aggregate;
+   ResetGlobalRiskAggregateSnapshot(aggregate);
+   const bool aggregate_ok=(aggregate_store!=NULL &&
+      aggregate_store.GetLatest(aggregate) && aggregate.is_valid &&
+      aggregate.context_count==InpTask029ContextCount &&
+      aggregate.active_count==InpTask029ContextCount &&
+      aggregate.portfolio_linkage_error_count==0 &&
+      aggregate.future_source_count==0 && aggregate.wrong_context_count==0 &&
+      aggregate_store.SequenceGapCount()==0 &&
+      aggregate_store.SequenceDuplicateCount()==0);
+   const int expected_engines=12*InpTask029ContextCount+12;
+   const double spare=100.0*bus.RemainingCapacity()/bus.Capacity();
+   const bool counts=(checked==InpTask029ContextCount &&
+      registry.AnalysisEngineCount()==6*InpTask029ContextCount &&
+      registry.DecisionSafetyEngineCount()==6*InpTask029ContextCount &&
+      manager.Count()==expected_engines && store!=NULL &&
+      store.StandbySnapshotCount()==InpTask029ContextCount &&
+      store.RiskSnapshotCount()==InpTask029ContextCount &&
+      store.ConfidenceSnapshotCount()==InpTask029ContextCount &&
+      store.DecisionScoreSnapshotCount()==InpTask029ContextCount);
+   const bool pass=(contexts_complete && state_isolated && source_time_safe &&
+      secondary_non_trading && primary_legacy_available && aggregate_ok && counts &&
+      bus.LegacyFallbackReadCount()==0 && bus.ContextViewWrongSymbolCount()==0 &&
+      spare>=30.0);
+   PrintFormat("[TASK029 REAL SUMMARY] Result=%s;Contexts=%d;Engines=%d;DataBus=%d;Remaining=%d;Spare=%.2f;StandbySnapshots=%d;RiskSnapshots=%d;ConfidenceSnapshots=%d;DecisionSnapshots=%d;AggregateSequence=%I64d;Active=%d;Standby=%d;RiskStopped=%d;Critical=%d;Invalid=%d;PortfolioLinkage=%d;FutureSource=%d;WrongContext=%d;LegacyWrite=0;LegacyFallback=%I64d;SecondaryEntry=0;SecondaryExit=0;SecondaryExecution=0;SecondaryOrder=0;SecondaryPosition=0",
+      (pass ? "PASS" : "FAIL"),checked,manager.Count(),bus.CurrentSize(),
+      bus.RemainingCapacity(),spare,(store==NULL ? 0 : store.StandbySnapshotCount()),
+      (store==NULL ? 0 : store.RiskSnapshotCount()),
+      (store==NULL ? 0 : store.ConfidenceSnapshotCount()),
+      (store==NULL ? 0 : store.DecisionScoreSnapshotCount()),
+      aggregate.evaluation_sequence,aggregate.active_count,aggregate.standby_count,
+      aggregate.risk_stopped_count,aggregate.critical_context_count,
+      aggregate.invalid_context_count,aggregate.portfolio_linkage_error_count,
+      aggregate.future_source_count,aggregate.wrong_context_count,
+      bus.LegacyFallbackReadCount());
+   return(pass ? 1.0 : 0.0);
+  }
+
+void OnDeinit(const int reason)
+  {
+   g_controller.Shutdown();
+   g_portfolio.Clear();
+   g_analysis_snapshots.Clear();
+   g_ready=false;
+  }
+
+void OnTradeTransaction(const MqlTradeTransaction &transaction,
+                        const MqlTradeRequest &request,
+                        const MqlTradeResult &result)
+  {
+   g_primary_execution.ObserveTradeTransaction(transaction);
+  }

@@ -28,6 +28,7 @@ private:
    ENUM_ENGINE_RUN_MODE m_run_modes[];
    bool                 m_change_pending[];
    bool                 m_has_context[];
+   bool                 m_context_data_views[];
    SRuntimeContextId    m_context_ids[];
    CStateManager        *m_state_managers[];
    datetime             m_last_bar_times[];
@@ -35,6 +36,7 @@ private:
    bool                 m_initialized;
    bool                 m_has_legacy_newbar_engine;
    datetime             m_last_bar_time;
+   CDataBus             *m_data_bus;
 
    bool              IsValidRunMode(const ENUM_ENGINE_RUN_MODE run_mode)
      {
@@ -93,7 +95,8 @@ private:
                                       const ENUM_ENGINE_RUN_MODE run_mode,
                                       const bool has_context,
                                       const SRuntimeContextId &context_id,
-                                      CStateManager *state_manager)
+                                      CStateManager *state_manager,
+                                      const bool context_data_view)
      {
       if(m_initialized)
         {
@@ -138,6 +141,7 @@ private:
          ArrayResize(m_run_modes,engine_count+1)!=(engine_count+1) ||
          ArrayResize(m_change_pending,engine_count+1)!=(engine_count+1) ||
          ArrayResize(m_has_context,engine_count+1)!=(engine_count+1) ||
+         ArrayResize(m_context_data_views,engine_count+1)!=(engine_count+1) ||
          ArrayResize(m_context_ids,engine_count+1)!=(engine_count+1) ||
          ArrayResize(m_state_managers,engine_count+1)!=(engine_count+1) ||
          ArrayResize(m_last_bar_times,engine_count+1)!=(engine_count+1))
@@ -147,6 +151,7 @@ private:
          ArrayResize(m_run_modes,engine_count);
          ArrayResize(m_change_pending,engine_count);
          ArrayResize(m_has_context,engine_count);
+         ArrayResize(m_context_data_views,engine_count);
          ArrayResize(m_context_ids,engine_count);
          ArrayResize(m_state_managers,engine_count);
          ArrayResize(m_last_bar_times,engine_count);
@@ -158,6 +163,7 @@ private:
       m_run_modes[engine_count]=run_mode;
       m_change_pending[engine_count]=false;
       m_has_context[engine_count]=has_context;
+      m_context_data_views[engine_count]=(has_context && context_data_view);
       m_context_ids[engine_count]=context_id;
       m_state_managers[engine_count]=state_manager;
       m_last_bar_times[engine_count]=0;
@@ -178,6 +184,7 @@ public:
       m_initialized=false;
       m_has_legacy_newbar_engine=false;
       m_last_bar_time=0;
+      m_data_bus=NULL;
      }
 
    //--- Legacy overload: no context metadata and the global StateManager are
@@ -188,7 +195,7 @@ public:
       SRuntimeContextId empty_context;
       empty_context.symbol="";
       empty_context.timeframe=PERIOD_CURRENT;
-      return(RegisterInternal(engine,run_mode,false,empty_context,NULL));
+      return(RegisterInternal(engine,run_mode,false,empty_context,NULL,false));
      }
 
    //--- Context-aware overload. EngineManager stores non-owning metadata; the
@@ -199,7 +206,21 @@ public:
                               const ENUM_ENGINE_RUN_MODE run_mode=RUNMODE_TICK)
      {
       CStateManager *state_manager_pointer=GetPointer(state_manager);
-      return(RegisterInternal(engine,run_mode,true,context_id,state_manager_pointer));
+      return(RegisterInternal(engine,run_mode,true,context_id,state_manager_pointer,false));
+     }
+
+   //--- Registers a context-scoped compatibility view for Task029 engines.
+   //--- Analysis engines retain their explicit Task027 bindings and therefore
+   //--- continue to use the older context overload above.
+   bool              RegisterContextDataView(
+                        IEngine &engine,
+                        const SRuntimeContextId &context_id,
+                        CStateManager &state_manager,
+                        const ENUM_ENGINE_RUN_MODE run_mode=RUNMODE_TICK)
+     {
+      CStateManager *state_manager_pointer=GetPointer(state_manager);
+      return(RegisterInternal(engine,run_mode,true,context_id,
+                              state_manager_pointer,true));
      }
 
    bool              Initialize(CDataBus &data_bus,CParameterManager &parameters,
@@ -207,6 +228,8 @@ public:
      {
       if(m_initialized)
          return(true);
+
+      m_data_bus=GetPointer(data_bus);
 
       const int engine_count=ArraySize(m_engines);
       if(m_has_legacy_newbar_engine)
@@ -241,7 +264,22 @@ public:
                m_last_bar_times[index]=m_last_bar_time;
            }
 
-         if(!m_engines[index].Initialize(data_bus,parameters))
+         bool context_view_started=false;
+         if(m_context_data_views[index])
+           {
+            context_view_started=data_bus.BeginContextView(m_context_ids[index]);
+            if(!context_view_started)
+              {
+               CLogger::Error("EngineManager could not activate a context DataBus view.");
+               Shutdown();
+               return(false);
+              }
+           }
+
+         const bool initialized=m_engines[index].Initialize(data_bus,parameters);
+         if(context_view_started)
+            data_bus.EndContextView();
+         if(!initialized)
            {
             CLogger::Error(StringFormat("Failed to initialize engine: %s",m_engines[index].GetName()));
             Shutdown();
@@ -315,7 +353,21 @@ public:
            }
 
          if(should_update)
+           {
+            bool context_view_started=false;
+            if(m_context_data_views[index])
+              {
+               context_view_started=m_data_bus.BeginContextView(m_context_ids[index]);
+               if(!context_view_started)
+                 {
+                  CLogger::Error("EngineManager skipped an engine because its context DataBus view could not be activated.");
+                  continue;
+                 }
+              }
             m_engines[index].Update();
+            if(context_view_started)
+               m_data_bus.EndContextView();
+           }
         }
      }
 
@@ -335,6 +387,7 @@ public:
       m_initialized_engine_count=0;
       m_initialized=false;
       m_last_bar_time=0;
+      m_data_bus=NULL;
      }
 
    int               Count(void)
