@@ -6,7 +6,9 @@
 
 #include "../Common/Constants.mqh"
 #include "../Common/Logger.mqh"
+#include "../Common/CommonSnapshotStore.mqh"
 #include "../Engine/BaseEngine.mqh"
+#include "../Portfolio/GlobalPortfolioSnapshotStore.mqh"
 
 //--- Shared Environment facts read from CDataBus once for each ranking cycle.
 struct SRankingEnvironment
@@ -83,6 +85,9 @@ private:
    double m_weight_volatility_suitability;
    double m_weight_regime_suitability;
    double m_weight_freshness;
+   CGlobalPortfolioSnapshotStore *m_portfolio_store;
+   CCommonSnapshotStore          *m_common_snapshot_store;
+   SPortfolioContextDefinition    m_portfolio_contexts[];
 
    void ResetPairSnapshot(SPairRankingSnapshot &snapshot,const string symbol)
      {
@@ -468,6 +473,291 @@ private:
       return(true);
      }
 
+   bool ReadContextText(const string name_space,
+                        const SRuntimeContextId &context_id,
+                        const string field,string &value)
+     {
+      return(m_data_bus!=NULL && m_data_bus.TryGetContextText(
+             name_space,context_id,field,value));
+     }
+
+   bool ReadContextDouble(const string name_space,
+                          const SRuntimeContextId &context_id,
+                          const string field,double &value)
+     {
+      string text="";
+      if(!ReadContextText(name_space,context_id,field,text) || StringLen(text)==0)
+         return(false);
+      value=StringToDouble(text);
+      return(true);
+     }
+
+   bool ReadContextBoolean(const string name_space,
+                           const SRuntimeContextId &context_id,
+                           const string field,bool &value)
+     {
+      string text="";
+      return(ReadContextText(name_space,context_id,field,text) &&
+             ReadBooleanText(text,value));
+     }
+
+   //--- Reads the same rounded context fields used by the primary legacy path.
+   //--- The typed Environment snapshot is consulted only for source timestamps
+   //--- and identity linkage; it is not a new score or filter.
+   bool ReadContextEnvironment(const SRuntimeContextId &context_id,
+                               SRankingEnvironment &environment,
+                               SPortfolioCandidateSnapshot &audit)
+     {
+      string updated_text="";
+      if(!ReadContextDouble(FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,context_id,
+                            "ATR",environment.atr) ||
+         !ReadContextDouble(FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,context_id,
+                            "Score",environment.volatility_score) ||
+         !ReadContextDouble(FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,context_id,
+                            "Score",environment.range_score) ||
+         !ReadContextDouble(FENX_DATABUS_NAMESPACE_CONTEXT_TREND,context_id,
+                            "Score",environment.trend_score) ||
+         !ReadContextDouble(FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,context_id,
+                            "Confidence",environment.market_confidence) ||
+         !ReadContextBoolean(FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,context_id,
+                             "IsRange",environment.is_range) ||
+         !ReadContextBoolean(FENX_DATABUS_NAMESPACE_CONTEXT_TREND,context_id,
+                             "IsTrend",environment.is_trend) ||
+         !ReadContextBoolean(FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,context_id,
+                             "IsDataValid",environment.range_data_valid) ||
+         !ReadContextBoolean(FENX_DATABUS_NAMESPACE_CONTEXT_TREND,context_id,
+                             "IsDataValid",environment.trend_data_valid) ||
+         !ReadContextText(FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,context_id,
+                          "State",environment.market_state) ||
+         !ReadContextText(FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,context_id,
+                          "UpdatedAt",updated_text) ||
+         !ReadTimestampText(updated_text,environment.updated_at))
+         return(false);
+
+      SEnvironmentSnapshot typed;
+      if(m_common_snapshot_store==NULL ||
+         !m_common_snapshot_store.GetEnvironmentSnapshot(
+            context_id.symbol,context_id.timeframe,typed) ||
+         typed.symbol!=context_id.symbol ||
+         typed.timeframe!=EnumToString(context_id.timeframe))
+         return(false);
+
+      audit.environment_updated_at=environment.updated_at;
+      audit.volatility_updated_at=typed.volatility_updated_at;
+      audit.range_updated_at=typed.range_updated_at;
+      audit.trend_updated_at=typed.trend_updated_at;
+      audit.market_state_updated_at=typed.market_state_updated_at;
+      audit.environment_atr=environment.atr;
+      audit.environment_volatility_score=environment.volatility_score;
+      audit.environment_range_score=environment.range_score;
+      audit.environment_trend_score=environment.trend_score;
+      audit.environment_confidence=environment.market_confidence;
+      audit.environment_is_range=environment.is_range;
+      audit.environment_is_trend=environment.is_trend;
+      audit.environment_market_state=environment.market_state;
+
+      if(environment.atr<=0.0 || environment.volatility_score<0.0 ||
+         environment.volatility_score>100.0 || environment.range_score<0.0 ||
+         environment.range_score>100.0 || environment.market_confidence<0.0 ||
+         environment.market_confidence>100.0 || !environment.range_data_valid ||
+         !environment.trend_data_valid)
+         return(false);
+      return(environment.market_state=="RANGING" ||
+             environment.market_state=="TRENDING" ||
+             environment.market_state=="VOLATILE" ||
+             environment.market_state=="TRANSITION");
+     }
+
+   bool ReadContextSelection(const SRuntimeContextId &context_id,
+                             SSelectionRankingInput &source,
+                             SPortfolioCandidateSnapshot &audit)
+     {
+      string text="";
+      string updated_text="";
+      if(!ReadContextText(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,context_id,
+                          FENX_DATABUS_FIELD_MARKET_SELECTION_SYMBOL,source.symbol) ||
+         source.symbol!=context_id.symbol ||
+         !ReadContextText(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,context_id,
+                          FENX_DATABUS_FIELD_MARKET_SELECTION_IS_ELIGIBLE,text) ||
+         !ReadBooleanText(text,source.is_market_eligible) ||
+         !ReadContextDouble(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,context_id,
+                            FENX_DATABUS_FIELD_MARKET_SELECTION_SCORE,
+                            source.selection_score) ||
+         !ReadContextDouble(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,context_id,
+                            FENX_DATABUS_FIELD_MARKET_SELECTION_CONFIDENCE,
+                            source.selection_confidence) ||
+         !ReadContextDouble(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,context_id,
+                            FENX_DATABUS_FIELD_MARKET_SELECTION_SPREAD_POINTS,
+                            source.spread_points) ||
+         !ReadContextDouble(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,context_id,
+                            FENX_DATABUS_FIELD_MARKET_SELECTION_SPREAD_ATR,
+                            source.spread_to_atr_ratio) ||
+         !ReadContextText(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,context_id,
+                          FENX_DATABUS_FIELD_MARKET_SELECTION_REJECTION,
+                          source.rejection_reason) ||
+         !ReadContextText(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,context_id,
+                          FENX_DATABUS_FIELD_MARKET_SELECTION_UPDATED_AT,
+                          updated_text) ||
+         !ReadTimestampText(updated_text,source.updated_at))
+         return(false);
+
+      audit.market_eligible=source.is_market_eligible;
+      audit.selection_score=source.selection_score;
+      audit.selection_confidence=source.selection_confidence;
+      audit.spread_points=source.spread_points;
+      audit.spread_to_atr_ratio=source.spread_to_atr_ratio;
+      audit.selection_updated_at=source.updated_at;
+      return(source.selection_score>=0.0 && source.selection_score<=100.0 &&
+             source.selection_confidence>=0.0 && source.selection_confidence<=100.0 &&
+             source.spread_points>=0.0 && source.spread_to_atr_ratio>=0.0);
+     }
+
+   //--- Primary context wins its symbol. Otherwise the earliest registered
+   //--- available/eligible auxiliary owns the one portfolio unit for a symbol.
+   //--- Registration order is only a duplicate-context selection policy; it is
+   //--- never introduced into the established ranking tie-break.
+   int PreferredPortfolioContext(const int context_index)
+     {
+      if(context_index<0 || context_index>=ArraySize(m_portfolio_contexts))
+         return(-1);
+      const string symbol=m_portfolio_contexts[context_index].config.id.symbol;
+      int preferred=-1;
+      for(int index=0;index<ArraySize(m_portfolio_contexts);index++)
+        {
+         const SPortfolioContextDefinition definition=m_portfolio_contexts[index];
+         if(!definition.config.enabled || !definition.available ||
+            definition.config.id.symbol!=symbol)
+            continue;
+         if(definition.config.role==FENX_CONTEXT_ROLE_PRIMARY_TRADING)
+            return(index);
+         if(preferred<0 || definition.registration_order<
+                           m_portfolio_contexts[preferred].registration_order)
+            preferred=index;
+        }
+      return(preferred);
+     }
+
+   void BuildShadowPortfolioRanking(void)
+     {
+      if(m_portfolio_store==NULL || m_common_snapshot_store==NULL ||
+         ArraySize(m_portfolio_contexts)<1)
+         return;
+
+      const ulong started=GetMicrosecondCount();
+      SGlobalPortfolioSnapshot portfolio;
+      ResetGlobalPortfolioSnapshot(portfolio);
+      portfolio.evaluation_sequence=m_portfolio_store.ExpectedSequence();
+      portfolio.evaluation_time=TimeCurrent();
+      portfolio.updated_at=portfolio.evaluation_time;
+      portfolio.context_count=ArraySize(m_portfolio_contexts);
+
+      SPortfolioCandidateSnapshot audits[];
+      SPairRankingSnapshot ranking_snapshots[];
+      if(ArrayResize(audits,portfolio.context_count)!=portfolio.context_count ||
+         ArrayResize(ranking_snapshots,portfolio.context_count)!=portfolio.context_count)
+         return;
+
+      SPairRankingCandidate candidates[];
+      bool all_source_data_valid=true;
+      for(int index=0;index<portfolio.context_count;index++)
+        {
+         ResetPortfolioCandidateSnapshot(audits[index]);
+         const SPortfolioContextDefinition definition=m_portfolio_contexts[index];
+         audits[index].evaluation_sequence=portfolio.evaluation_sequence;
+         audits[index].context_id=definition.config.id;
+         audits[index].context_role=definition.config.role;
+         audits[index].registration_order=definition.registration_order;
+         audits[index].context_enabled=definition.config.enabled;
+         audits[index].context_available=definition.available;
+         audits[index].trade_enabled=definition.config.trade_enabled;
+         audits[index].portfolio_eligible=(definition.config.enabled &&
+                                           definition.available);
+         audits[index].updated_at=portfolio.evaluation_time;
+         ResetPairSnapshot(ranking_snapshots[index],definition.config.id.symbol);
+         ranking_snapshots[index].updated_at=portfolio.evaluation_time;
+
+         if(!definition.config.enabled)
+           {
+            audits[index].reason="Context is disabled.";
+            continue;
+           }
+         if(!definition.available)
+           {
+            audits[index].reason="Context is unavailable.";
+            continue;
+           }
+         portfolio.available_count++;
+         const int preferred=PreferredPortfolioContext(index);
+         if(preferred!=index)
+           {
+            audits[index].reason="Duplicate symbol timeframe is analysis-only.";
+            portfolio.duplicate_symbol_context_count++;
+            continue;
+           }
+
+         SRankingEnvironment environment;
+         SSelectionRankingInput selection;
+         if(!ReadContextEnvironment(definition.config.id,environment,audits[index]) ||
+            !ReadContextSelection(definition.config.id,selection,audits[index]))
+           {
+            audits[index].reason="Context Environment or Market Selection data is unavailable or invalid.";
+            all_source_data_valid=false;
+            continue;
+           }
+
+         double environment_freshness=0.0;
+         double selection_freshness=0.0;
+         if(!CalculateFreshness(environment.updated_at,environment_freshness) ||
+            !CalculateFreshness(selection.updated_at,selection_freshness))
+           {
+            audits[index].reason="Context Environment or Market Selection data is stale.";
+            all_source_data_valid=false;
+            continue;
+           }
+         if(!selection.is_market_eligible)
+           {
+            audits[index].reason="Market Selection rejected this context.";
+            if(StringLen(selection.rejection_reason)>0)
+               audits[index].reason=audits[index].reason+" "+selection.rejection_reason;
+            continue;
+           }
+         portfolio.eligible_count++;
+         if(environment.market_state=="VOLATILE")
+           {
+            audits[index].reason="Environment market state is VOLATILE.";
+            continue;
+           }
+
+         const double freshness=MathMin(environment_freshness,selection_freshness);
+         BuildRankedSnapshot(selection,environment,freshness,ranking_snapshots[index]);
+         audits[index].is_candidate=true;
+         audits[index].is_ranked=true;
+         audits[index].ranking_score=ranking_snapshots[index].score;
+         audits[index].ranking_confidence=ranking_snapshots[index].confidence;
+         audits[index].ranking_updated_at=portfolio.evaluation_time;
+         audits[index].reason=ranking_snapshots[index].reason;
+         const int candidate_count=ArraySize(candidates);
+         if(ArrayResize(candidates,candidate_count+1)!=(candidate_count+1))
+            return;
+         candidates[candidate_count].snapshot_index=index;
+         candidates[candidate_count].spread_cost=selection.spread_to_atr_ratio;
+        }
+
+      SortCandidates(candidates,ranking_snapshots);
+      for(int index=0;index<ArraySize(candidates);index++)
+        {
+         const int snapshot_index=candidates[index].snapshot_index;
+         ranking_snapshots[snapshot_index].rank=index+1;
+         audits[snapshot_index].rank=index+1;
+        }
+      portfolio.candidate_count=ArraySize(candidates);
+      portfolio.excluded_count=portfolio.context_count-portfolio.candidate_count;
+      portfolio.ranking_valid=all_source_data_valid;
+      portfolio.is_fresh=all_source_data_valid;
+      portfolio.ranking_runtime_microseconds=(long)(GetMicrosecondCount()-started);
+      m_portfolio_store.BeginRankedEvaluation(portfolio,audits);
+     }
+
 public:
                      CPairRankingEngine(void)
      {
@@ -484,6 +774,29 @@ public:
       m_weight_volatility_suitability=0.0;
       m_weight_regime_suitability=0.0;
       m_weight_freshness=0.0;
+      m_portfolio_store=NULL;
+      m_common_snapshot_store=NULL;
+     }
+
+   //--- Optional shadow attachment. Legacy standalone callers need no change;
+   //--- production and Task028 harnesses attach this before Initialize.
+   bool              SetGlobalPortfolio(CGlobalPortfolioSnapshotStore &portfolio_store,
+                                        CCommonSnapshotStore &snapshot_store,
+                                        SPortfolioContextDefinition &contexts[])
+     {
+      if(m_initialized || ArraySize(contexts)<1 ||
+         ArrayResize(m_portfolio_contexts,ArraySize(contexts))!=ArraySize(contexts))
+         return(false);
+      for(int index=0;index<ArraySize(contexts);index++)
+        {
+         if(!IsValidRuntimeContextId(contexts[index].config.id) ||
+            contexts[index].registration_order<0)
+            return(false);
+         m_portfolio_contexts[index]=contexts[index];
+        }
+      m_portfolio_store=GetPointer(portfolio_store);
+      m_common_snapshot_store=GetPointer(snapshot_store);
+      return(true);
      }
 
    virtual bool       Initialize(CDataBus &data_bus,CParameterManager &parameters)
@@ -632,11 +945,18 @@ public:
         }
       if(!PublishGlobalSnapshot(global_snapshot))
          CLogger::Error("PairRankingEngine could not publish global ranking data.");
+
+      // Shadow publication is intentionally last: no existing calculation,
+      // key, or downstream consumer can observe it during Task028.
+      BuildShadowPortfolioRanking();
      }
 
    virtual void       Shutdown(void)
      {
       ArrayFree(m_symbols);
+      ArrayFree(m_portfolio_contexts);
+      m_portfolio_store=NULL;
+      m_common_snapshot_store=NULL;
       CBaseEngine::Shutdown();
      }
   };

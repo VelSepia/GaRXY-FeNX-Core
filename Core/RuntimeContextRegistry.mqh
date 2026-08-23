@@ -9,6 +9,7 @@
 #include "../Common/Types.mqh"
 #include "../Config/ParameterManager.mqh"
 #include "../Common/CommonSnapshotStore.mqh"
+#include "../Portfolio/GlobalPortfolioSnapshotStore.mqh"
 #include "../Environment/VolatilityAnalyzer.mqh"
 #include "../Environment/RangeDetector.mqh"
 #include "../Environment/TrendDetector.mqh"
@@ -498,6 +499,23 @@ public:
       for(int index=0;index<ArraySize(m_contexts);index++)
          count+=m_contexts[index].AnalysisEngineCount();
       return(count);
+     }
+
+   //--- Exports read-only value metadata for the global shadow portfolio.
+   //--- The store/portfolio engines never receive ownership of runtime
+   //--- contexts, engine instances, indicator handles, or StateManagers.
+   bool              ExportPortfolioDefinitions(SPortfolioContextDefinition &definitions[])
+     {
+      const int count=ArraySize(m_contexts);
+      if(!m_initialized || ArrayResize(definitions,count)!=count)
+         return(false);
+      for(int index=0;index<count;index++)
+        {
+         definitions[index].config=m_contexts[index].Config();
+         definitions[index].available=m_contexts[index].IsAvailable();
+         definitions[index].registration_order=index;
+        }
+      return(true);
      }
 
    int               IndicatorHandleCount(void)

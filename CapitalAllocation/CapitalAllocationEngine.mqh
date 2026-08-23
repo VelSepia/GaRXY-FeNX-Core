@@ -7,6 +7,7 @@
 #include "../Common/Constants.mqh"
 #include "../Common/Logger.mqh"
 #include "../Engine/BaseEngine.mqh"
+#include "../Portfolio/GlobalPortfolioSnapshotStore.mqh"
 
 //--- Shared, factual Environment snapshot read through CDataBus.
 struct SAllocationEnvironment
@@ -83,6 +84,7 @@ private:
    double m_volatility_penalty;
    double m_transition_penalty;
    double m_high_volatility_score;
+   CGlobalPortfolioSnapshotStore *m_portfolio_store;
 
    void ResetSnapshot(SCapitalAllocationSnapshot &snapshot,const string symbol)
      {
@@ -529,6 +531,143 @@ private:
       return(true);
      }
 
+   //--- Completes the pending shadow ranking with the existing allocation
+   //--- score, threshold, sort, cap, and redistribution contract. Results stay
+   //--- in the typed portfolio store and cannot enable secondary execution.
+   void BuildShadowPortfolioAllocation(void)
+     {
+      if(m_portfolio_store==NULL)
+         return;
+
+      const ulong started=GetMicrosecondCount();
+      SGlobalPortfolioSnapshot portfolio;
+      SPortfolioCandidateSnapshot audits[];
+      if(!m_portfolio_store.GetPendingEvaluation(portfolio,audits))
+         return;
+
+      const int context_count=ArraySize(audits);
+      SCapitalAllocationSnapshot snapshots[];
+      if(ArrayResize(snapshots,context_count)!=context_count)
+         return;
+      SCapitalAllocationCandidate candidates[];
+      bool all_candidate_data_valid=true;
+      for(int index=0;index<context_count;index++)
+        {
+         ResetSnapshot(snapshots[index],audits[index].context_id.symbol);
+         snapshots[index].updated_at=portfolio.evaluation_time;
+         audits[index].allocation_updated_at=portfolio.evaluation_time;
+         if(!portfolio.ranking_valid || !audits[index].is_candidate)
+            continue;
+
+         SCapitalAllocationInput source;
+         source.symbol=audits[index].context_id.symbol;
+         source.is_market_eligible=audits[index].market_eligible;
+         source.is_pair_ranked=audits[index].is_ranked;
+         source.pair_rank=audits[index].rank;
+         source.pair_ranking_score=audits[index].ranking_score;
+         source.pair_ranking_confidence=audits[index].ranking_confidence;
+         source.selection_updated_at=audits[index].selection_updated_at;
+         source.ranking_updated_at=audits[index].ranking_updated_at;
+         SAllocationEnvironment environment;
+         environment.volatility_score=audits[index].environment_volatility_score;
+         environment.market_state=audits[index].environment_market_state;
+         environment.range_data_valid=true;
+         environment.trend_data_valid=true;
+         environment.updated_at=audits[index].environment_updated_at;
+
+         double environment_freshness=0.0;
+         double ranking_freshness=0.0;
+         double selection_freshness=0.0;
+         double symbol_ranking_freshness=0.0;
+         if(!CalculateFreshness(environment.updated_at,environment_freshness) ||
+            !CalculateFreshness(portfolio.evaluation_time,ranking_freshness) ||
+            !CalculateFreshness(source.selection_updated_at,selection_freshness) ||
+            !CalculateFreshness(source.ranking_updated_at,symbol_ranking_freshness))
+           {
+            audits[index].reason="Shadow allocation source is stale.";
+            all_candidate_data_valid=false;
+            continue;
+           }
+         if(!source.is_market_eligible || !source.is_pair_ranked ||
+            source.pair_rank<=0)
+           {
+            audits[index].reason="Shadow ranking did not accept this context.";
+            continue;
+           }
+         if(source.pair_ranking_confidence<m_confidence_threshold)
+           {
+            audits[index].reason="Pair Ranking confidence is below the allocation threshold.";
+            continue;
+           }
+         if(environment.market_state=="VOLATILE")
+           {
+            audits[index].reason="Environment market state is VOLATILE.";
+            continue;
+           }
+
+         const double freshness=MathMin(MathMin(environment_freshness,ranking_freshness),
+                                        MathMin(selection_freshness,
+                                                symbol_ranking_freshness));
+         BuildAllocationScore(source,environment,freshness,snapshots[index]);
+         if(snapshots[index].allocation_score<=0.0)
+           {
+            audits[index].reason="Allocation score is not positive.";
+            continue;
+           }
+         audits[index].allocation_score=snapshots[index].allocation_score;
+         audits[index].allocation_confidence=snapshots[index].allocation_confidence;
+         const int candidate_index=ArraySize(candidates);
+         if(ArrayResize(candidates,candidate_index+1)!=(candidate_index+1))
+            return;
+         candidates[candidate_index].snapshot_index=index;
+         candidates[candidate_index].pair_rank=source.pair_rank;
+        }
+
+      SortCandidates(candidates,snapshots);
+      int candidate_count=ArraySize(candidates);
+      if(candidate_count>m_max_funded_symbols)
+         candidate_count=m_max_funded_symbols;
+      bool funded[];
+      if(ArrayResize(funded,candidate_count)!=candidate_count)
+         return;
+      for(int index=0;index<candidate_count;index++)
+         funded[index]=true;
+      for(int index=candidate_count;index<ArraySize(candidates);index++)
+         audits[candidates[index].snapshot_index].reason=
+            "Candidate is outside the funded-symbol limit.";
+
+      const double effective_cap=MathMin(m_max_per_symbol,
+                                         m_total_budget*(m_concentration_limit/100.0));
+      if(candidate_count>0)
+         ApplyMinimumThreshold(candidates,candidate_count,funded,snapshots,effective_cap);
+
+      portfolio.allocated_count=0;
+      portfolio.total_allocation=0.0;
+      for(int index=0;index<candidate_count;index++)
+        {
+         const int snapshot_index=candidates[index].snapshot_index;
+         audits[snapshot_index].allocation_score=
+            snapshots[snapshot_index].allocation_score;
+         audits[snapshot_index].allocation_confidence=
+            snapshots[snapshot_index].allocation_confidence;
+         audits[snapshot_index].allocation_percent=
+            snapshots[snapshot_index].allocation_percent;
+         if(!funded[index] || snapshots[snapshot_index].allocation_percent<
+            m_min_threshold-FENX_PAIR_RANKING_COMPARE_EPSILON)
+            continue;
+         audits[snapshot_index].is_allocated=true;
+         audits[snapshot_index].reason="Capital allocation recommendation is active.";
+         portfolio.allocated_count++;
+         portfolio.total_allocation+=snapshots[snapshot_index].allocation_percent;
+        }
+      portfolio.total_allocation=ClampPercent(portfolio.total_allocation);
+      portfolio.allocation_valid=(portfolio.ranking_valid &&
+                                  all_candidate_data_valid);
+      portfolio.allocation_runtime_microseconds=
+         (long)(GetMicrosecondCount()-started);
+      m_portfolio_store.CompleteAllocation(portfolio,audits);
+     }
+
 public:
                      CCapitalAllocationEngine(void)
      {
@@ -543,6 +682,17 @@ public:
       m_volatility_penalty=0.0;
       m_transition_penalty=0.0;
       m_high_volatility_score=0.0;
+      m_portfolio_store=NULL;
+     }
+
+   //--- Optional Task028 shadow attachment. It does not replace or publish any
+   //--- existing CapitalAllocation.* DataBus key.
+   bool              SetGlobalPortfolio(CGlobalPortfolioSnapshotStore &portfolio_store)
+     {
+      if(m_initialized)
+         return(false);
+      m_portfolio_store=GetPointer(portfolio_store);
+      return(true);
      }
 
    virtual bool       Initialize(CDataBus &data_bus,CParameterManager &parameters)
@@ -741,11 +891,14 @@ public:
         }
       if(!PublishGlobalSnapshot(global_snapshot))
          CLogger::Error("CapitalAllocationEngine could not publish global allocation data.");
+
+      BuildShadowPortfolioAllocation();
      }
 
    virtual void       Shutdown(void)
      {
       ArrayFree(m_symbols);
+      m_portfolio_store=NULL;
       CBaseEngine::Shutdown();
      }
   };

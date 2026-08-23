@@ -9,6 +9,7 @@
 #include "Core/CoreController.mqh"
 #include "Core/DataBusCapacityPlan.mqh"
 #include "Common/CommonSnapshotStore.mqh"
+#include "Portfolio/GlobalPortfolioSnapshotStore.mqh"
 #include "Environment/MarketStateIntegrator.mqh"
 #include "Environment/EnvironmentEngine.mqh"
 #include "Environment/RangeDetector.mqh"
@@ -56,6 +57,7 @@ input string InpExecutionTradeComment               = "GaRXY_FeNX_Core_v1";
 CParameterManager g_parameters;
 CCoreController   g_controller;
 CCommonSnapshotStore g_common_snapshot_store;
+CGlobalPortfolioSnapshotStore g_global_portfolio_store;
 CPairRankingEngine     g_pair_ranking_engine;
 CCapitalAllocationEngine g_capital_allocation_engine;
 CTradingStyleEngine      g_trading_style_engine;
@@ -118,6 +120,23 @@ int OnInit()
                                            g_common_snapshot_store,true))
      {
       CLogger::Error("Unable to prepare runtime context analysis pipelines.");
+      return(INIT_FAILED);
+     }
+
+   //--- Global Portfolio is shadow-only in Task028. Context definitions are
+   //--- copied from the registry before engine initialization; no secondary
+   //--- result is connected to a downstream or execution consumer.
+   SPortfolioContextDefinition portfolio_contexts[];
+   CRuntimeContextRegistry *runtime_contexts=g_controller.RuntimeContexts();
+   g_global_portfolio_store.Clear();
+   if(runtime_contexts==NULL ||
+      !runtime_contexts.ExportPortfolioDefinitions(portfolio_contexts) ||
+      !g_pair_ranking_engine.SetGlobalPortfolio(g_global_portfolio_store,
+                                                 g_common_snapshot_store,
+                                                 portfolio_contexts) ||
+      !g_capital_allocation_engine.SetGlobalPortfolio(g_global_portfolio_store))
+     {
+      CLogger::Error("Unable to configure the shadow Global Portfolio layer.");
       return(INIT_FAILED);
      }
    if(!g_standby_engine.SetSnapshotStore(g_common_snapshot_store))
@@ -244,6 +263,7 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    g_controller.Shutdown();
+   g_global_portfolio_store.Clear();
    g_common_snapshot_store.Clear();
   }
 
