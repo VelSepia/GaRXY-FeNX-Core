@@ -5,6 +5,7 @@
 #define FENX_EXECUTION_ORDER_EXECUTOR_MQH
 
 #include <Trade/Trade.mqh>
+#include "../Common/Types.mqh"
 #include "OrderRequest.mqh"
 
 //--- The only Phase3-9.5 component permitted to send an order.
@@ -12,6 +13,8 @@ class COrderExecutor
   {
 private:
    CTrade m_trade;
+   SRuntimeContextId m_context_id;
+   bool   m_context_configured;
    long   m_magic_number;
    int    m_maximum_slippage_points;
    int    m_transient_retry_limit;
@@ -126,6 +129,9 @@ public:
                      COrderExecutor(void)
      {
       m_magic_number=0;
+      m_context_id.symbol="";
+      m_context_id.timeframe=PERIOD_CURRENT;
+      m_context_configured=false;
       m_maximum_slippage_points=0;
       m_transient_retry_limit=0;
       m_maximum_permitted_volume=0.0;
@@ -136,6 +142,9 @@ public:
                                 const double maximum_permitted_volume=0.0)
      {
       m_magic_number=magic_number;
+      m_context_id.symbol="";
+      m_context_id.timeframe=PERIOD_CURRENT;
+      m_context_configured=false;
       m_maximum_slippage_points=MathMax(0,maximum_slippage_points);
       m_transient_retry_limit=MathMax(0,transient_retry_limit);
       m_maximum_permitted_volume=MathMax(0.0,maximum_permitted_volume);
@@ -143,9 +152,42 @@ public:
       m_trade.SetDeviationInPoints(m_maximum_slippage_points);
      }
 
+   //--- Context identity is retained beside the sole CTrade instance. No
+   //--- caller can prepare or send a request for a different symbol or magic.
+   bool              ConfigureContext(const SRuntimeContextId &context_id,
+                                      const long magic_number,
+                                      const int maximum_slippage_points,
+                                      const int transient_retry_limit,
+                                      const double maximum_permitted_volume=0.0)
+     {
+      if(!IsValidRuntimeContextId(context_id) || magic_number<=0)
+         return(false);
+      m_context_id=context_id;
+      m_context_configured=true;
+      m_magic_number=magic_number;
+      m_maximum_slippage_points=MathMax(0,maximum_slippage_points);
+      m_transient_retry_limit=MathMax(0,transient_retry_limit);
+      m_maximum_permitted_volume=MathMax(0.0,maximum_permitted_volume);
+      m_trade.SetExpertMagicNumber((ulong)m_magic_number);
+      m_trade.SetDeviationInPoints(m_maximum_slippage_points);
+      return(true);
+     }
+
+   bool              MatchesContextRequest(const SOrderRequest &request)
+     {
+      if(request.magic_number!=m_magic_number)
+         return(false);
+      return(!m_context_configured || request.symbol==m_context_id.symbol);
+     }
+
    bool              Prepare(const SOrderRequest &request,SOrderRequest &normalized,
                              string &reason)
      {
+      if(!MatchesContextRequest(request))
+        {
+         reason="Order request does not match the configured context identity.";
+         return(false);
+        }
       if(StringLen(request.symbol)==0 || !SymbolSelect(request.symbol,true))
         {
          reason="Execution symbol is unavailable or cannot be selected.";
@@ -187,6 +229,11 @@ public:
       result.retry_count=0;
       result.description="";
       result.executed_at=TimeCurrent();
+      if(!MatchesContextRequest(request))
+        {
+         result.description="Order send rejected because context ownership does not match.";
+         return(false);
+        }
       SOrderRequest attempt=request;
       int retry_count=0;
       while(true)
@@ -239,7 +286,8 @@ public:
         }
 
       const string symbol=PositionGetString(POSITION_SYMBOL);
-      if(PositionGetInteger(POSITION_MAGIC)!=m_magic_number || StringLen(symbol)==0)
+      if(PositionGetInteger(POSITION_MAGIC)!=m_magic_number || StringLen(symbol)==0 ||
+         (m_context_configured && symbol!=m_context_id.symbol))
         {
          result.description="Position closure rejected because ownership could not be verified.";
          return(false);

@@ -272,6 +272,7 @@ public:
      }
 
    long              EvaluationCount(void) { return(m_evaluation_count); }
+   long              CurrentSequence(void) { return(m_sequence); }
    long              AuditCount(void) { return(m_audit_count); }
    long              DataLeakCount(void) { return(m_data_leak_count); }
    long              InvalidCount(void) { return(m_invalid_count); }

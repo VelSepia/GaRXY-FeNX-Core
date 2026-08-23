@@ -11,6 +11,7 @@ class CDuplicateOrderGuard
   {
 private:
    string   m_last_symbol;
+   long     m_last_magic_number;
    int      m_last_direction;
    datetime m_last_bar_time;
    double   m_last_price;
@@ -23,6 +24,7 @@ public:
                      CDuplicateOrderGuard(void)
      {
       m_last_symbol="";
+      m_last_magic_number=0;
       m_last_direction=-1;
       m_last_bar_time=0;
       m_last_price=0.0;
@@ -48,13 +50,15 @@ public:
          return(true);
         }
       if(m_one_order_per_bar && request.symbol==m_last_symbol &&
+         request.magic_number==m_last_magic_number &&
          (int)request.direction==m_last_direction &&
          request.signal_bar_time==m_last_bar_time)
         {
          reason="A request for this direction was already attempted on the completed bar.";
          return(true);
         }
-      if(request.symbol==m_last_symbol && (int)request.direction==m_last_direction &&
+      if(request.symbol==m_last_symbol && request.magic_number==m_last_magic_number &&
+         (int)request.direction==m_last_direction &&
          request.request_identifier==m_last_request_identifier &&
          MathAbs(request.entry_price-m_last_price)<=price_tolerance)
         {
@@ -68,6 +72,7 @@ public:
    void              MarkAttempt(const SOrderRequest &request)
      {
       m_last_symbol=request.symbol;
+      m_last_magic_number=request.magic_number;
       m_last_direction=(int)request.direction;
       m_last_bar_time=request.signal_bar_time;
       m_last_price=request.entry_price;
@@ -78,6 +83,7 @@ public:
    void              Reset(void)
      {
       m_last_symbol="";
+      m_last_magic_number=0;
       m_last_direction=-1;
       m_last_bar_time=0;
       m_last_price=0.0;

@@ -23,6 +23,9 @@
 #include "../Risk/GlobalRiskAggregateEngine.mqh"
 #include "../Confidence/ConfidenceEngine.mqh"
 #include "../Decision/DecisionScoreEngine.mqh"
+#include "../Execution/ExecutionEngine.mqh"
+#include "../Execution/PositionOwnershipArbiter.mqh"
+#include "../Execution/TradeTransactionRouter.mqh"
 #include "EngineManager.mqh"
 #include "StateManager.mqh"
 
@@ -73,6 +76,9 @@ private:
    bool                  m_available;
    bool                  m_analysis_prepared;
    bool                  m_decision_safety_prepared;
+   bool                  m_execution_prepared;
+   CExecutionEngine      m_execution;
+   CExecutionEngine     *m_execution_external;
    CVolatilityAnalyzer   m_volatility;
    CRangeDetector        m_range;
    CTrendDetector        m_trend;
@@ -95,6 +101,8 @@ public:
       m_available=false;
       m_analysis_prepared=false;
       m_decision_safety_prepared=false;
+      m_execution_prepared=false;
+      m_execution_external=NULL;
      }
 
    bool              Configure(const SRuntimeContextConfig &config,
@@ -109,6 +117,8 @@ public:
       m_initialized=m_available;
       m_analysis_prepared=false;
       m_decision_safety_prepared=false;
+      m_execution_prepared=false;
+      m_execution_external=NULL;
       m_local_state.Reset();
       if(!m_local_state.ConfigureContext(config.id))
          return(false);
@@ -193,6 +203,49 @@ public:
              manager.RegisterContextDataView(m_decision_score,m_config.id,m_local_state));
      }
 
+   //--- Every available context owns one execution infrastructure instance.
+   //--- The Primary route binds the unchanged externally registered engine;
+   //--- auxiliary routes own dormant instances whose order path is closed by
+   //--- both context policy and Strategy SupportsContext.
+   bool              PrepareExecution(CExecutionEngine *primary_execution,
+                                      CStateManager &global_state,
+                                      CCommonSnapshotStore &secondary_store,
+                                      CPositionOwnershipArbiter &arbiter,
+                                      const bool is_primary)
+     {
+      if(!m_available)
+         return(true);
+      if(m_execution_prepared)
+         return(true);
+      CExecutionEngine *engine=(is_primary ? primary_execution :
+                                GetPointer(m_execution));
+      if(engine==NULL)
+         return(false);
+      if(!is_primary && !engine.SetSnapshotStore(secondary_store))
+         return(false);
+      if(!engine.SetRuntimeContext(m_config,global_state,m_local_state,arbiter,
+                                   is_primary))
+         return(false);
+      m_execution_external=(is_primary ? engine : NULL);
+      m_execution_prepared=true;
+      return(true);
+     }
+
+   bool              RegisterExecution(CEngineManager &manager,
+                                       const bool is_primary)
+     {
+      if(!m_available)
+         return(true);
+      if(!m_execution_prepared)
+         return(false);
+      // Primary remains at its established legacy registration point so its
+      // tick ordering and Task029 trade series are not shifted.
+      if(is_primary)
+         return(true);
+      return(manager.RegisterContextDataView(m_execution,m_config.id,
+                                             m_local_state,RUNMODE_TICK));
+     }
+
    SRuntimeContextConfig Config(void)
      {
       return(m_config);
@@ -226,6 +279,15 @@ public:
    bool              IsDecisionSafetyPrepared(void)
      {
       return(m_decision_safety_prepared);
+     }
+
+   bool              IsExecutionPrepared(void) { return(m_execution_prepared); }
+   CExecutionEngine *Execution(void)
+     {
+      if(!m_execution_prepared)
+         return(NULL);
+      return(m_execution_external!=NULL ? m_execution_external :
+             GetPointer(m_execution));
      }
 
    int               DecisionSafetyEngineCount(void)
@@ -268,9 +330,13 @@ private:
    bool            m_analysis_registered;
    bool            m_decision_safety_prepared;
    bool            m_decision_safety_registered;
+   bool            m_execution_prepared;
+   bool            m_execution_registered;
    CCommonSnapshotStore m_decision_snapshot_store;
+   CCommonSnapshotStore m_execution_snapshot_store;
    CGlobalRiskAggregateStore m_global_risk_aggregate_store;
    CGlobalRiskAggregateEngine m_global_risk_aggregate_engine;
+   CPositionOwnershipArbiter m_position_ownership_arbiter;
 
    bool              BrokerContextAvailable(const SRuntimeContextConfig &config)
      {
@@ -295,6 +361,8 @@ public:
       m_analysis_registered=false;
       m_decision_safety_prepared=false;
       m_decision_safety_registered=false;
+      m_execution_prepared=false;
+      m_execution_registered=false;
      }
 
    //--- Pure preflight: identity/policy validation is kept separate from
@@ -477,6 +545,59 @@ public:
       return(true);
      }
 
+   //--- Binds the existing Primary execution engine and creates one dormant
+   //--- owned infrastructure instance for each available auxiliary context.
+   bool              PrepareExecution(CExecutionEngine &primary_execution,
+                                      CStateManager &global_state)
+     {
+      if(!m_initialized || !m_decision_safety_prepared)
+         return(false);
+      if(m_execution_prepared)
+         return(true);
+      m_execution_snapshot_store.Clear();
+      m_position_ownership_arbiter.Clear();
+      for(int index=0;index<ArraySize(m_contexts);index++)
+        {
+         if(!m_contexts[index].PrepareExecution(GetPointer(primary_execution),
+               global_state,m_execution_snapshot_store,
+               m_position_ownership_arbiter,index==m_primary_index))
+            return(false);
+        }
+      m_execution_prepared=true;
+      return(true);
+     }
+
+   //--- Auxiliary execution instances run immediately after context
+   //--- Decision/Safety. Primary stays at the unchanged legacy pipeline slot.
+   bool              RegisterExecution(CEngineManager &manager)
+     {
+      if(!m_execution_prepared || m_execution_registered)
+         return(false);
+      for(int index=0;index<ArraySize(m_contexts);index++)
+         if(!m_contexts[index].RegisterExecution(manager,
+                                                 index==m_primary_index))
+            return(false);
+      m_execution_registered=true;
+      return(true);
+     }
+
+   bool              RegisterExecutionRoutes(CTradeTransactionRouter &router)
+     {
+      if(!m_execution_prepared)
+         return(false);
+      router.Clear();
+      for(int index=0;index<ArraySize(m_contexts);index++)
+        {
+         if(!m_contexts[index].IsAvailable())
+            continue;
+         CExecutionEngine *engine=m_contexts[index].Execution();
+         if(engine==NULL ||
+            !router.RegisterRoute(m_contexts[index].Config(),engine))
+            return(false);
+        }
+      return(router.RouteCount()==AvailableContextCount());
+     }
+
    //--- Production path. Broker discovery and selection are isolated here;
    //--- required failures stop initialization while optional failures remain
    //--- represented as unavailable contexts.
@@ -546,8 +667,12 @@ public:
       m_analysis_registered=false;
       m_decision_safety_prepared=false;
       m_decision_safety_registered=false;
+      m_execution_prepared=false;
+      m_execution_registered=false;
       m_decision_snapshot_store.Clear();
+      m_execution_snapshot_store.Clear();
       m_global_risk_aggregate_store.Clear();
+      m_position_ownership_arbiter.Clear();
      }
 
    int               Count(void)
@@ -598,6 +723,8 @@ public:
    bool              IsAnalysisRegistered(void) { return(m_analysis_registered); }
    bool              IsDecisionSafetyPrepared(void) { return(m_decision_safety_prepared); }
    bool              IsDecisionSafetyRegistered(void) { return(m_decision_safety_registered); }
+   bool              IsExecutionPrepared(void) { return(m_execution_prepared); }
+   bool              IsExecutionRegistered(void) { return(m_execution_registered); }
 
    int               AvailableContextCount(void)
      {
@@ -623,6 +750,22 @@ public:
       return(count);
      }
 
+   int               ExecutionInfrastructureCount(void)
+     {
+      int count=0;
+      for(int index=0;index<ArraySize(m_contexts);index++)
+         if(m_contexts[index].IsExecutionPrepared()) count++;
+      return(count);
+     }
+
+   int               RegisteredContextExecutionEngineCount(void)
+     {
+      if(!m_execution_registered)
+         return(0);
+      const int count=ExecutionInfrastructureCount();
+      return(count>1 ? count-1 : 0);
+     }
+
    CCommonSnapshotStore *DecisionSnapshotStore(void)
      {
       return(GetPointer(m_decision_snapshot_store));
@@ -636,6 +779,16 @@ public:
    CGlobalRiskAggregateEngine *GlobalRiskAggregateEngine(void)
      {
       return(GetPointer(m_global_risk_aggregate_engine));
+     }
+
+   CCommonSnapshotStore *ExecutionSnapshotStore(void)
+     {
+      return(GetPointer(m_execution_snapshot_store));
+     }
+
+   CPositionOwnershipArbiter *PositionOwnershipArbiter(void)
+     {
+      return(GetPointer(m_position_ownership_arbiter));
      }
 
    //--- Exports read-only value metadata for the global shadow portfolio.

@@ -15,6 +15,7 @@
 #include "ExecutionGate.mqh"
 #include "OrderExecutor.mqh"
 #include "PositionManager.mqh"
+#include "PositionOwnershipArbiter.mqh"
 #include "TradeResultLogger.mqh"
 
 //--- One update-cycle record published by the Minimal Execution System.
@@ -53,6 +54,16 @@ private:
    CCommonEntryEngineAdapter   m_entry_adapter;
    CCommonExitEngineAdapter    m_exit_adapter;
    CCommonExecutionEngineAdapter m_execution_adapter;
+   SRuntimeContextConfig         m_context_config;
+   bool                          m_context_configured;
+   ENUM_TIMEFRAMES               m_timeframe;
+   CStateManager                *m_global_state_manager;
+   CStateManager                *m_context_state_manager;
+   CPositionOwnershipArbiter     m_fallback_ownership_arbiter;
+   CPositionOwnershipArbiter    *m_ownership_arbiter;
+   bool                          m_strategy_supported;
+   bool                          m_context_execution_permitted;
+   bool                          m_publish_standard_summary;
    bool                        m_execution_enabled;
    bool                        m_ready;
    string                      m_symbol;
@@ -183,13 +194,13 @@ private:
       spread_points=-1.0;
       if(!SymbolInfoTick(m_symbol,tick))
         {
-         reason="Current USDJPY tick data is unavailable.";
+         reason="Current context tick data is unavailable.";
          return(false);
         }
       const double point=SymbolInfoDouble(m_symbol,SYMBOL_POINT);
       if(point<=0.0 || tick.bid<=0.0 || tick.ask<=0.0 || tick.ask<tick.bid)
         {
-         reason="USDJPY tick or point data is invalid.";
+         reason="Context tick or point data is invalid.";
          return(false);
         }
       spread_points=(tick.ask-tick.bid)/point;
@@ -473,9 +484,18 @@ public:
                      CExecutionEngine(void)
      {
       SetName("ExecutionEngine");
+      ResetRuntimeContextConfig(m_context_config);
+      m_context_configured=false;
+      m_timeframe=PERIOD_CURRENT;
+      m_global_state_manager=NULL;
+      m_context_state_manager=NULL;
+      m_ownership_arbiter=GetPointer(m_fallback_ownership_arbiter);
+      m_strategy_supported=false;
+      m_context_execution_permitted=true;
+      m_publish_standard_summary=true;
       m_execution_enabled=false;
       m_ready=false;
-      m_symbol="USDJPY";
+      m_symbol="";
       m_magic_number=0;
       m_fixed_lot=0.0;
       m_exit_mode="";
@@ -526,6 +546,63 @@ public:
       return(entry_attached && exit_attached && execution_attached);
      }
 
+   //--- Binds the established execution contract to one immutable runtime
+   //--- identity. Registry/state/arbiter references are non-owning and remain
+   //--- valid for the lifetime of the registered engine.
+   bool              SetRuntimeContext(const SRuntimeContextConfig &config,
+                                       CStateManager &global_state_manager,
+                                       CStateManager &context_state_manager,
+                                       CPositionOwnershipArbiter &ownership_arbiter,
+                                       const bool publish_standard_summary=true)
+     {
+      if(m_initialized || !IsValidRuntimeContextId(config.id) ||
+         !IsValidRuntimeContextRole(config.role) || config.magic<=0)
+         return(false);
+      m_context_config=config;
+      m_context_configured=true;
+      m_timeframe=config.id.timeframe;
+      m_global_state_manager=GetPointer(global_state_manager);
+      m_context_state_manager=GetPointer(context_state_manager);
+      m_ownership_arbiter=GetPointer(ownership_arbiter);
+      m_publish_standard_summary=publish_standard_summary;
+      if(!publish_standard_summary)
+         SetName("ExecutionEngine["+RuntimeContextToString(config.id)+"]");
+      return(m_global_state_manager!=NULL && m_context_state_manager!=NULL &&
+             m_ownership_arbiter!=NULL);
+     }
+
+   bool              StrategySupportsContext(void) { return(m_strategy_supported); }
+   bool              ContextExecutionPermitted(void)
+     {
+      return(m_context_execution_permitted);
+     }
+   SRuntimeContextId RuntimeContextId(void)
+     {
+      SRuntimeContextId id;
+      id.symbol=m_symbol;
+      id.timeframe=m_timeframe;
+      return(id);
+     }
+   long              MagicNumber(void) { return(m_magic_number); }
+   long              EntryEvaluationSequence(void)
+     {
+      return(m_entry_adapter.CurrentSequence());
+     }
+   long              ExitEvaluationSequence(void)
+     {
+      return(m_exit_adapter.CurrentSequence());
+     }
+   long              ExecutionSequence(void)
+     {
+      return(m_execution_adapter.CurrentSequence());
+     }
+   int               SuccessfulOrderCount(void) { return(m_successful_order_count); }
+   int               SuccessfulCloseCount(void) { return(m_successful_close_count); }
+   int               ManagedPositionCount(void)
+     {
+      return(m_position_manager.CountFeNXPositions());
+     }
+
    virtual bool       Initialize(CDataBus &data_bus,CParameterManager &parameters)
      {
       if(!CBaseEngine::Initialize(data_bus,parameters))
@@ -536,31 +613,55 @@ public:
          CBaseEngine::Shutdown();
          return(false);
         }
-      if(!m_entry_adapter.Configure(parameters.ExecutionSymbol(),_Period,
+      SRuntimeContextId execution_context;
+      if(m_context_configured)
+        {
+         execution_context=m_context_config.id;
+         m_symbol=m_context_config.id.symbol;
+         m_timeframe=m_context_config.id.timeframe;
+         m_magic_number=m_context_config.magic;
+        }
+      else
+        {
+         execution_context.symbol=parameters.ExecutionSymbol();
+         execution_context.timeframe=(ENUM_TIMEFRAMES)_Period;
+         m_symbol=execution_context.symbol;
+         m_timeframe=execution_context.timeframe;
+         m_magic_number=parameters.ExecutionMagicNumber();
+         m_global_state_manager=m_state_manager;
+         m_context_state_manager=m_state_manager;
+         m_ownership_arbiter=GetPointer(m_fallback_ownership_arbiter);
+        }
+      if(!IsValidRuntimeContextId(execution_context) ||
+         m_global_state_manager==NULL || m_context_state_manager==NULL ||
+         m_ownership_arbiter==NULL)
+        {
+         CLogger::Error("ExecutionEngine received invalid runtime context ownership.");
+         CBaseEngine::Shutdown();
+         return(false);
+        }
+      if(!m_entry_adapter.Configure(m_symbol,m_timeframe,
                                      parameters.RiskStaleDataLimitSeconds()))
         {
          CLogger::Error("ExecutionEngine requires CommonSnapshotStore for Entry audit.");
          CBaseEngine::Shutdown();
          return(false);
         }
-      if(!m_exit_adapter.Configure(parameters.ExecutionSymbol(),_Period,
-                                   parameters.ExecutionMagicNumber(),
+      if(!m_exit_adapter.Configure(m_symbol,m_timeframe,m_magic_number,
                                    parameters.RiskStaleDataLimitSeconds()))
         {
          CLogger::Error("ExecutionEngine requires CommonSnapshotStore for Exit audit.");
          CBaseEngine::Shutdown();
          return(false);
         }
-      if(!m_execution_adapter.Configure(parameters.ExecutionSymbol(),_Period,
-                                        parameters.RiskStaleDataLimitSeconds()))
+      if(!m_execution_adapter.Configure(m_symbol,m_timeframe,
+                                         parameters.RiskStaleDataLimitSeconds()))
         {
          CLogger::Error("ExecutionEngine requires CommonSnapshotStore for Execution audit.");
          CBaseEngine::Shutdown();
          return(false);
         }
       m_execution_enabled=parameters.ExecutionEnabled();
-      m_symbol=parameters.ExecutionSymbol();
-      m_magic_number=parameters.ExecutionMagicNumber();
       m_fixed_lot=parameters.ExecutionFixedLot();
       m_exit_mode=parameters.ExecutionExitMode();
       m_fixed_take_profit_points=parameters.ExecutionFixedTakeProfitPoints();
@@ -568,8 +669,14 @@ public:
       m_range_stop_buffer_points=parameters.ExecutionRangeStopBufferPoints();
       m_maximum_open_positions=parameters.ExecutionMaximumOpenPositionsPerSymbol();
       m_trade_comment=parameters.ExecutionTradeComment();
-      m_ready=(m_symbol=="USDJPY" && m_magic_number>0 && m_fixed_lot>0.0 &&
-               (m_exit_mode=="RANGE_BASED" || m_exit_mode=="FIXED_POINTS") &&
+      m_strategy_supported=m_strategy.SupportsContext(m_symbol,m_timeframe);
+      m_context_execution_permitted=
+         (m_strategy_supported &&
+          (!m_context_configured ||
+           (m_context_config.enabled && m_context_config.trade_enabled &&
+            m_context_config.role==FENX_CONTEXT_ROLE_PRIMARY_TRADING)));
+      m_ready=(m_magic_number>0 && m_fixed_lot>0.0 &&
+                (m_exit_mode=="RANGE_BASED" || m_exit_mode=="FIXED_POINTS") &&
                m_fixed_take_profit_points>0.0 && m_fixed_stop_loss_points>0.0 &&
                m_range_stop_buffer_points>=0.0 && m_maximum_open_positions==1 &&
                StringLen(m_trade_comment)>0);
@@ -580,23 +687,37 @@ public:
          return(false);
         }
 
-      m_gate.Configure(data_bus,m_state_manager,m_symbol,m_execution_enabled,
-                       parameters.ExecutionMaximumSpreadPoints(),
-                       parameters.ExecutionMinimumRangeScore(),
-                       parameters.ExecutionMinimumStrategyConfidence(),
-                       parameters.ExecutionMinimumRiskConfidence(),
-                       parameters.RiskStaleDataLimitSeconds());
+      m_gate.ConfigureContext(data_bus,m_global_state_manager,
+                              m_context_state_manager,execution_context,
+                              m_execution_enabled,m_context_execution_permitted,
+                              parameters.ExecutionMaximumSpreadPoints(),
+                              parameters.ExecutionMinimumRangeScore(),
+                              parameters.ExecutionMinimumStrategyConfidence(),
+                              parameters.ExecutionMinimumRiskConfidence(),
+                              parameters.RiskStaleDataLimitSeconds());
       m_strategy.Configure(data_bus,m_symbol,parameters.ExecutionEntryBoundaryDistancePoints(),
-                           parameters.ExecutionEntryBoundaryDistanceAtrRatio(),
-                           parameters.ExecutionMinimumRangeScore(),parameters.ExecutionAllowBuy(),
-                           parameters.ExecutionAllowSell());
+                            parameters.ExecutionEntryBoundaryDistanceAtrRatio(),
+                            parameters.ExecutionMinimumRangeScore(),parameters.ExecutionAllowBuy(),
+                            parameters.ExecutionAllowSell(),m_timeframe);
       m_duplicate_guard.Configure(parameters.ExecutionOrderCooldownSeconds(),
                                   parameters.ExecutionOneOrderPerBar());
-      m_position_manager.Configure(m_symbol,m_magic_number);
-      m_order_executor.Configure(m_magic_number,parameters.ExecutionMaximumSlippagePoints(),
-                                  parameters.ExecutionTransientRetryLimit(),m_fixed_lot);
-      CLogger::Info(StringFormat("ExecutionEngine initialized for %s; execution is %s.",m_symbol,
-                                 (m_execution_enabled ? "ENABLED" : "DISABLED")));
+      if(!m_position_manager.Configure(execution_context,m_magic_number,
+                                       m_ownership_arbiter) ||
+         !m_order_executor.ConfigureContext(execution_context,m_magic_number,
+                                             parameters.ExecutionMaximumSlippagePoints(),
+                                             parameters.ExecutionTransientRetryLimit(),
+                                             m_fixed_lot))
+        {
+         CLogger::Error("ExecutionEngine could not initialize context ownership services.");
+         CBaseEngine::Shutdown();
+         return(false);
+        }
+      CLogger::Info(StringFormat(
+         "ExecutionEngine initialized for %s; execution=%s;strategy_supported=%s;context_permitted=%s.",
+         RuntimeContextToString(execution_context),
+         (m_execution_enabled ? "ENABLED" : "DISABLED"),
+         (m_strategy_supported ? "true" : "false"),
+         (m_context_execution_permitted ? "true" : "false")));
       return(true);
      }
 
@@ -802,29 +923,41 @@ public:
 
    virtual void       Shutdown(void)
      {
-      CLogger::Info(StringFormat("ExecutionEngine shutdown: entries %d successful, %d failed, %d blocked; closes %d successful, %d failed.",
-                                 m_successful_order_count,m_failed_order_count,m_blocked_order_count,
-                                 m_successful_close_count,m_failed_close_count));
-      CLogger::Info(StringFormat("[BACKTEST_EXECUTION] updates=%I64d;entry_signals=%d;entry_blocks=%d;no_signal_bars=%d;orders_requested=%d;orders_accepted=%d;orders_rejected=%d;closes_requested=%d;closes_accepted=%d;closes_rejected=%d;entry_retries=%d;close_retries=%d;position_open_events=%d;position_close_events=%d;minimum_volume_adjustments=%d",
-                                 m_update_count,m_entry_signal_count,m_entry_block_event_count,
-                                 m_no_signal_bar_count,
-                                 m_successful_order_count+m_failed_order_count,
-                                 m_successful_order_count,m_failed_order_count,
-                                 m_successful_close_count+m_failed_close_count,
-                                 m_successful_close_count,m_failed_close_count,
-                                 m_entry_retry_count,m_close_retry_count,m_position_open_event_count,
-                                 m_position_close_event_count,m_minimum_volume_adjustment_count));
-      for(int stage=0;stage<FENX_PIPELINE_STAGE_COUNT;stage++)
+      if(m_publish_standard_summary)
         {
-         CLogger::Info(StringFormat("[BACKTEST_PIPELINE] stage=%s;blocked_ticks=%I64d;block_events=%I64d",
-                                    FenxPipelineStageName((ENUM_FENX_PIPELINE_STAGE)stage),
-                                    m_pipeline_block_ticks[stage],
-                                    m_pipeline_block_events[stage]));
+         CLogger::Info(StringFormat("ExecutionEngine shutdown: entries %d successful, %d failed, %d blocked; closes %d successful, %d failed.",
+                                    m_successful_order_count,m_failed_order_count,m_blocked_order_count,
+                                    m_successful_close_count,m_failed_close_count));
+         CLogger::Info(StringFormat("[BACKTEST_EXECUTION] updates=%I64d;entry_signals=%d;entry_blocks=%d;no_signal_bars=%d;orders_requested=%d;orders_accepted=%d;orders_rejected=%d;closes_requested=%d;closes_accepted=%d;closes_rejected=%d;entry_retries=%d;close_retries=%d;position_open_events=%d;position_close_events=%d;minimum_volume_adjustments=%d",
+                                    m_update_count,m_entry_signal_count,m_entry_block_event_count,
+                                    m_no_signal_bar_count,
+                                    m_successful_order_count+m_failed_order_count,
+                                    m_successful_order_count,m_failed_order_count,
+                                    m_successful_close_count+m_failed_close_count,
+                                    m_successful_close_count,m_failed_close_count,
+                                    m_entry_retry_count,m_close_retry_count,m_position_open_event_count,
+                                    m_position_close_event_count,m_minimum_volume_adjustment_count));
+         for(int stage=0;stage<FENX_PIPELINE_STAGE_COUNT;stage++)
+           {
+            CLogger::Info(StringFormat("[BACKTEST_PIPELINE] stage=%s;blocked_ticks=%I64d;block_events=%I64d",
+                                       FenxPipelineStageName((ENUM_FENX_PIPELINE_STAGE)stage),
+                                       m_pipeline_block_ticks[stage],
+                                       m_pipeline_block_events[stage]));
+           }
+         m_strategy.LogTask007Summary();
+         m_entry_adapter.LogSummary();
+         m_exit_adapter.LogSummary();
+         m_execution_adapter.LogSummary();
         }
-      m_strategy.LogTask007Summary();
-      m_entry_adapter.LogSummary();
-      m_exit_adapter.LogSummary();
-      m_execution_adapter.LogSummary();
+      else
+         CLogger::Info(StringFormat(
+            "[TASK030_CONTEXT_EXECUTION] Context=%s|%s;Initialized=true;StrategySupported=%s;ContextPermitted=%s;Orders=%d;Closes=%d;Positions=%d",
+            m_symbol,RuntimeContextTimeframeName(m_timeframe),
+            (m_strategy_supported ? "true" : "false"),
+            (m_context_execution_permitted ? "true" : "false"),
+            m_successful_order_count+m_failed_order_count,
+            m_successful_close_count+m_failed_close_count,
+            m_position_manager.CountFeNXPositions()));
       m_duplicate_guard.Reset();
       CBaseEngine::Shutdown();
      }
@@ -834,6 +967,11 @@ public:
    void              ObserveTradeTransaction(const MqlTradeTransaction &transaction)
      {
       m_exit_adapter.ObserveTradeTransaction(transaction);
+     }
+
+   bool              OwnsTransactionFacts(const string symbol,const long magic_number)
+     {
+      return(m_position_manager.OwnsPositionFacts(symbol,magic_number));
      }
   };
 

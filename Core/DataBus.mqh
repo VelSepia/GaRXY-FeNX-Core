@@ -119,6 +119,11 @@ private:
          name_space=FENX_DATABUS_NAMESPACE_CONTEXT_RISK_GLOBAL;
          prefix="Risk.";
         }
+      else if(StringFind(key,"Execution.")==0)
+        {
+         name_space=FENX_DATABUS_NAMESPACE_CONTEXT_EXECUTION_GLOBAL;
+         prefix="Execution.";
+        }
       else
          return(false);
 

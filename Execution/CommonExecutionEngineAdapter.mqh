@@ -429,6 +429,8 @@ public:
           m_snapshot_store.ExecutionHistoryCount()),
          FENX_COMMON_EXECUTION_HISTORY_LIMIT));
      }
+
+   long              CurrentSequence(void) { return(m_sequence); }
   };
 
 #endif // FENX_COMMON_EXECUTION_ENGINE_ADAPTER_MQH

@@ -581,6 +581,7 @@ public:
      }
 
    long              FinalizedCount(void) { return(m_finalized_count); }
+   long              CurrentSequence(void) { return(m_sequence); }
    long              DataLeakCount(void) { return(m_data_leak_count); }
    long              InvalidCount(void) { return(m_invalid_count); }
 

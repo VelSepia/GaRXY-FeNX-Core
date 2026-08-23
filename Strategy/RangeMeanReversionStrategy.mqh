@@ -6,6 +6,7 @@
 
 #include "../Common/Constants.mqh"
 #include "../Common/Logger.mqh"
+#include "../Common/Types.mqh"
 #include "../Core/DataBus.mqh"
 #include "../Decision/DecisionBottleneckGate.mqh"
 
@@ -67,6 +68,7 @@ class CRangeMeanReversionStrategy
 private:
    CDataBus *m_data_bus;
    string    m_symbol;
+   ENUM_TIMEFRAMES m_timeframe;
    double    m_boundary_distance_points;
    double    m_boundary_distance_atr_ratio;
    double    m_minimum_range_score;
@@ -186,7 +188,7 @@ private:
      {
       gate_input.direction=direction;
       gate_input.entry_symbol=m_symbol;
-      gate_input.entry_timeframe=EnumToString(_Period);
+      gate_input.entry_timeframe=EnumToString(m_timeframe);
       gate_input.evaluation_time=TimeCurrent();
       gate_input.snapshot_loaded=false;
       // A per-symbol DataBus key is itself the snapshot symbol identity.
@@ -901,6 +903,7 @@ public:
      {
       m_data_bus=NULL;
       m_symbol="";
+      m_timeframe=PERIOD_CURRENT;
       m_boundary_distance_points=0.0;
       m_boundary_distance_atr_ratio=0.0;
       m_minimum_range_score=0.0;
@@ -938,14 +941,25 @@ public:
       m_task011_last_sell_telemetry_bar_time=0;
      }
 
+   //--- Formal strategy capability. Task030 moves the historical USDJPY/H1
+   //--- restriction here instead of weakening it inside execution plumbing.
+   bool              SupportsContext(const string symbol,
+                                     const ENUM_TIMEFRAMES timeframe)
+     {
+      return(symbol=="USDJPY" && timeframe==PERIOD_H1);
+     }
+
    void              Configure(CDataBus &data_bus,const string symbol,
                                const double boundary_distance_points,
                                const double boundary_distance_atr_ratio,
                                const double minimum_range_score,
-                               const bool allow_buy,const bool allow_sell)
+                               const bool allow_buy,const bool allow_sell,
+                               const ENUM_TIMEFRAMES timeframe=PERIOD_CURRENT)
      {
       m_data_bus=GetPointer(data_bus);
       m_symbol=symbol;
+      m_timeframe=(timeframe==PERIOD_CURRENT ?
+                   (ENUM_TIMEFRAMES)_Period : timeframe);
       m_boundary_distance_points=boundary_distance_points;
       m_boundary_distance_atr_ratio=boundary_distance_atr_ratio;
       m_minimum_range_score=minimum_range_score;
@@ -981,9 +995,9 @@ public:
    bool              Evaluate(SRangeEntryIntent &intent)
      {
       ResetIntent(intent);
-      if(m_data_bus==NULL || m_symbol!="USDJPY")
+      if(m_data_bus==NULL || !SupportsContext(m_symbol,m_timeframe))
         {
-         intent.reason="Range strategy supports USDJPY only.";
+         intent.reason="Range strategy does not support this Symbol+Timeframe context.";
          return(false);
         }
 
@@ -1005,7 +1019,7 @@ public:
 
       MqlRates rates[];
       // start_pos=1 explicitly excludes the forming bar and prevents look-ahead bias.
-      if(CopyRates(m_symbol,PERIOD_CURRENT,1,1,rates)!=1)
+      if(CopyRates(m_symbol,m_timeframe,1,1,rates)!=1)
         {
          intent.reason="The latest completed candle is unavailable.";
          return(false);
@@ -1153,9 +1167,9 @@ public:
                                   SRangeExitIntent &intent)
      {
       ResetExitIntent(intent);
-      if(m_data_bus==NULL || m_symbol!="USDJPY")
+      if(m_data_bus==NULL || !SupportsContext(m_symbol,m_timeframe))
         {
-         intent.reason="Range exit supports USDJPY only.";
+         intent.reason="Range exit does not support this Symbol+Timeframe context.";
          return(false);
         }
 
@@ -1171,7 +1185,7 @@ public:
 
       MqlRates rates[];
       // The close decision uses only the latest completed candle.
-      if(CopyRates(m_symbol,PERIOD_CURRENT,1,1,rates)!=1)
+      if(CopyRates(m_symbol,m_timeframe,1,1,rates)!=1)
         {
          intent.reason="The latest completed candle is unavailable for position exit.";
          return(false);

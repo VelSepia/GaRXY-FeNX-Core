@@ -4,24 +4,55 @@
 #ifndef FENX_EXECUTION_POSITION_MANAGER_MQH
 #define FENX_EXECUTION_POSITION_MANAGER_MQH
 
+#include "../Common/Types.mqh"
+#include "PositionOwnershipArbiter.mqh"
+
 //--- Identifies and reports FeNX positions without sending trade requests.
 class CPositionManager
   {
 private:
    string m_symbol;
+   SRuntimeContextId m_context_id;
    long   m_magic_number;
+   CPositionOwnershipArbiter *m_ownership_arbiter;
 
 public:
                      CPositionManager(void)
      {
       m_symbol="";
+      m_context_id.symbol="";
+      m_context_id.timeframe=PERIOD_CURRENT;
       m_magic_number=0;
+      m_ownership_arbiter=NULL;
      }
 
    void              Configure(const string symbol,const long magic_number)
      {
       m_symbol=symbol;
+      m_context_id.symbol=symbol;
+      m_context_id.timeframe=(ENUM_TIMEFRAMES)_Period;
       m_magic_number=magic_number;
+      m_ownership_arbiter=NULL;
+     }
+
+   //--- Formal context identity used by Task030. Arbiter ownership remains
+   //--- external and shared across contexts; PositionManager never deletes it.
+   bool              Configure(const SRuntimeContextId &context_id,
+                               const long magic_number,
+                               CPositionOwnershipArbiter &ownership_arbiter)
+     {
+      if(!IsValidRuntimeContextId(context_id) || magic_number<=0)
+         return(false);
+      m_context_id=context_id;
+      m_symbol=context_id.symbol;
+      m_magic_number=magic_number;
+      m_ownership_arbiter=GetPointer(ownership_arbiter);
+      return(m_ownership_arbiter!=NULL);
+     }
+
+   bool              OwnsPositionFacts(const string symbol,const long magic_number)
+     {
+      return(symbol==m_symbol && magic_number==m_magic_number);
      }
 
    //--- Returns the single managed position expected by the execution contract.
@@ -83,11 +114,17 @@ public:
          reason="An existing FeNX position already uses the execution symbol.";
          return(false);
         }
-      // Conservative behavior is required for both hedging and netting accounts: do not merge
-      // a FeNX order into a manual or another-EA USDJPY position.
-      if(HasAnyPositionOnSymbol())
+      // Conservative behavior is required for both hedging and netting
+      // accounts: never merge a context order into another owner position.
+      if(m_ownership_arbiter!=NULL)
         {
-         reason="An existing position on USDJPY blocks a new FeNX order to avoid interference.";
+         if(!m_ownership_arbiter.CanAcquireLive(m_context_id,m_magic_number,reason))
+            return(false);
+        }
+      else if(HasAnyPositionOnSymbol())
+        {
+         reason="An existing position on "+m_symbol+
+                " blocks a new FeNX order to avoid interference.";
          return(false);
         }
       reason="";

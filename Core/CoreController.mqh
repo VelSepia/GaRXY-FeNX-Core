@@ -22,6 +22,7 @@ private:
    bool           m_initialized;
    bool           m_runtime_contexts_prepared;
    bool           m_runtime_decision_safety_prepared;
+   bool           m_runtime_execution_prepared;
 
 public:
                      CCoreController(void)
@@ -29,6 +30,7 @@ public:
       m_initialized=false;
       m_runtime_contexts_prepared=false;
       m_runtime_decision_safety_prepared=false;
+      m_runtime_execution_prepared=false;
      }
 
    //--- Creates context-owned analysis instances before registration. The
@@ -118,6 +120,28 @@ public:
       return(m_runtime_context_registry.RegisterDecisionSafety(m_engine_manager));
      }
 
+   bool              PrepareRuntimeContextExecution(
+                        CExecutionEngine &primary_execution)
+     {
+      if(m_initialized || !m_runtime_decision_safety_prepared)
+         return(false);
+      if(m_runtime_execution_prepared)
+         return(true);
+      if(!m_runtime_context_registry.PrepareExecution(primary_execution,
+                                                      m_state_manager))
+         return(false);
+
+      m_runtime_execution_prepared=true;
+      return(true);
+     }
+
+   bool              RegisterRuntimeContextExecutionEngines(void)
+     {
+      if(!m_runtime_execution_prepared || m_initialized)
+         return(false);
+      return(m_runtime_context_registry.RegisterExecution(m_engine_manager));
+     }
+
    bool              Initialize(CParameterManager &parameters)
      {
       if(m_initialized)
@@ -147,9 +171,13 @@ public:
          (m_runtime_contexts_prepared ?
           FENX_ANALYSIS_CONTEXT_KEY_COUNT*
              m_runtime_context_registry.AvailableContextCount() : 0)+
-         (m_runtime_decision_safety_prepared ?
-          FENX_DECISION_SAFETY_CONTEXT_KEY_COUNT*
-             m_runtime_context_registry.AvailableContextCount() : 0);
+          (m_runtime_decision_safety_prepared ?
+           FENX_DECISION_SAFETY_CONTEXT_KEY_COUNT*
+              m_runtime_context_registry.AvailableContextCount() : 0)+
+          (m_runtime_execution_prepared ?
+           FENX_EXECUTION_CONTEXT_KEY_COUNT*
+              (m_runtime_context_registry.AvailableContextCount()>1 ?
+               m_runtime_context_registry.AvailableContextCount()-1 : 0) : 0);
       const int maximum_safe_entries=(int)MathFloor(
          FENX_DATABUS_CAPACITY*(1.0-FENX_DATABUS_MINIMUM_SPARE_RATIO));
       SRuntimeContextPreflight runtime_preflight;
@@ -215,6 +243,7 @@ public:
       m_initialized=false;
       m_runtime_contexts_prepared=false;
       m_runtime_decision_safety_prepared=false;
+      m_runtime_execution_prepared=false;
       CLogger::Info("CoreController shut down.");
      }
 

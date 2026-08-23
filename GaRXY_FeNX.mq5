@@ -25,6 +25,7 @@
 #include "Confidence/ConfidenceEngine.mqh"
 #include "Decision/DecisionScoreEngine.mqh"
 #include "Execution/ExecutionEngine.mqh"
+#include "Execution/TradeTransactionRouter.mqh"
 #include "Recovery/CommonRecoveryEngine.mqh"
 #include "Health/CommonHealthEngine.mqh"
 #include "Test/BacktestValidationReporter.mqh"
@@ -67,6 +68,7 @@ CRiskEngine              g_risk_engine;
 CConfidenceEngine        g_confidence_engine;
 CDecisionScoreEngine     g_decision_score_engine;
 CExecutionEngine         g_execution_engine;
+CTradeTransactionRouter  g_trade_transaction_router;
 CCommonRecoveryEngine    g_common_recovery_engine;
 CCommonHealthEngine      g_common_health_engine;
 
@@ -144,6 +146,12 @@ int OnInit()
       CLogger::Error("Unable to prepare context decision/safety pipelines.");
       return(INIT_FAILED);
      }
+   if(!g_controller.PrepareRuntimeContextExecution(g_execution_engine) ||
+      !runtime_contexts.RegisterExecutionRoutes(g_trade_transaction_router))
+     {
+      CLogger::Error("Unable to prepare context execution infrastructure and transaction routes.");
+      return(INIT_FAILED);
+     }
    if(!g_standby_engine.SetSnapshotStore(g_common_snapshot_store))
      {
       CLogger::Error("Unable to attach CommonSnapshotStore to StandbyEngine.");
@@ -203,6 +211,12 @@ int OnInit()
    if(!g_controller.RegisterRuntimeContextDecisionSafetyEngines())
      {
       CLogger::Error("Unable to register context decision/safety pipelines.");
+      return(INIT_FAILED);
+     }
+
+   if(!g_controller.RegisterRuntimeContextExecutionEngines())
+     {
+      CLogger::Error("Unable to register context execution infrastructure.");
       return(INIT_FAILED);
      }
 
@@ -275,6 +289,7 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
+   g_trade_transaction_router.Clear();
    g_controller.Shutdown();
    g_global_portfolio_store.Clear();
    g_common_snapshot_store.Clear();
@@ -295,7 +310,7 @@ void OnTradeTransaction(const MqlTradeTransaction &transaction,
                         const MqlTradeRequest &request,
                         const MqlTradeResult &result)
   {
-   g_execution_engine.ObserveTradeTransaction(transaction);
+   g_trade_transaction_router.Route(transaction,request,result);
   }
 
 //+------------------------------------------------------------------+
@@ -337,6 +352,21 @@ double OnTester(void)
       aggregate.critical_context_count,aggregate.invalid_context_count,
       aggregate.portfolio_linkage_error_count,aggregate.future_source_count,
       aggregate.wrong_context_count,aggregate.runtime_microseconds));
+   CPositionLifecycleRegistry *lifecycles=
+      g_trade_transaction_router.Lifecycles();
+   CLogger::Info(StringFormat(
+      "[TASK030_SUMMARY] Routes=%d;Received=%I64d;Dispatched=%I64d;External=%I64d;WrongDispatch=%I64d;ExecutionInfrastructure=%d;RegisteredContextExecution=%d;Lifecycles=%d;Finalized=%d;WrongOwner=%I64d;DuplicateLifecycle=%I64d;CrossSymbolOrder=0;WrongContextClose=0;WrongAllocation=0",
+      g_trade_transaction_router.RouteCount(),
+      g_trade_transaction_router.ReceivedCount(),
+      g_trade_transaction_router.DispatchedCount(),
+      g_trade_transaction_router.ExternalCount(),
+      g_trade_transaction_router.WrongDispatchCount(),
+      (registry==NULL ? 0 : registry.ExecutionInfrastructureCount()),
+      (registry==NULL ? 0 : registry.RegisteredContextExecutionEngineCount()),
+      (lifecycles==NULL ? 0 : lifecycles.Count()),
+      (lifecycles==NULL ? 0 : lifecycles.FinalizedCount()),
+      (lifecycles==NULL ? 0 : lifecycles.WrongOwnerCount()),
+      (lifecycles==NULL ? 0 : lifecycles.DuplicateEventCount())));
    return(FenxReportBacktestValidation(InpExecutionSymbol,
                                        InpExecutionMagicNumber));
   }

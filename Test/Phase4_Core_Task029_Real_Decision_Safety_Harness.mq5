@@ -16,6 +16,7 @@
 #include "../Confidence/ConfidenceEngine.mqh"
 #include "../Decision/DecisionScoreEngine.mqh"
 #include "../Execution/ExecutionEngine.mqh"
+#include "../Execution/TradeTransactionRouter.mqh"
 #include "../Recovery/CommonRecoveryEngine.mqh"
 #include "../Health/CommonHealthEngine.mqh"
 
@@ -34,6 +35,7 @@ CRiskEngine g_primary_risk;
 CConfidenceEngine g_primary_confidence;
 CDecisionScoreEngine g_primary_decision;
 CExecutionEngine g_primary_execution;
+CTradeTransactionRouter g_transaction_router;
 CCommonRecoveryEngine g_primary_recovery;
 CCommonHealthEngine g_primary_health;
 bool g_ready=false;
@@ -113,16 +115,19 @@ int OnInit(void)
       !g_pair_ranking.SetGlobalPortfolio(g_portfolio,g_analysis_snapshots,definitions) ||
       !g_capital_allocation.SetGlobalPortfolio(g_portfolio) ||
       !g_controller.PrepareRuntimeContextDecisionSafety(g_portfolio) ||
+      !g_controller.PrepareRuntimeContextExecution(g_primary_execution) ||
+      !registry.RegisterExecutionRoutes(g_transaction_router) ||
       !g_controller.RegisterRuntimeContextAnalysisEngines() ||
       !g_controller.RegisterEngine(g_pair_ranking) ||
       !g_controller.RegisterEngine(g_capital_allocation) ||
       !g_controller.RegisterRuntimeContextDecisionSafetyEngines() ||
+      !g_controller.RegisterRuntimeContextExecutionEngines() ||
       !AttachPrimaryStores() || !RegisterPrimaryPipeline() ||
       !g_controller.Initialize(g_parameters))
       return(INIT_FAILED);
 
    g_ready=true;
-   Print("[TASK029 REAL] Init=PASS;SecondaryTrading=false");
+   Print("[TASK030 REAL] Init=PASS;SecondaryTrading=false");
    return(INIT_SUCCEEDED);
   }
 
@@ -153,6 +158,10 @@ double OnTester(void)
    bool state_isolated=true;
    bool source_time_safe=true;
    bool secondary_non_trading=true;
+   bool execution_initialized=true;
+   bool strategy_capability=true;
+   long secondary_orders=0;
+   long secondary_positions=0;
    int checked=0;
    for(int index=0;index<registry.Count();index++)
      {
@@ -186,7 +195,32 @@ double OnTester(void)
       state_isolated=(state_isolated && local_state!=NULL &&
                       local_state.IsContextLocal());
       if(index>0)
+        {
          secondary_non_trading=(secondary_non_trading && !config.trade_enabled);
+         CExecutionEngine *execution=runtime.Execution();
+         execution_initialized=(execution_initialized && execution!=NULL);
+         if(execution!=NULL)
+           {
+            strategy_capability=(strategy_capability &&
+                                 !execution.StrategySupportsContext() &&
+                                 !execution.ContextExecutionPermitted());
+            secondary_orders+=execution.SuccessfulOrderCount();
+            secondary_positions+=execution.ManagedPositionCount();
+           }
+         execution_initialized=(execution_initialized &&
+            ContextField(bus,FENX_DATABUS_NAMESPACE_EXECUTION,id,
+                         FENX_DATABUS_FIELD_EXECUTION_UPDATED_AT) &&
+            ContextField(bus,FENX_DATABUS_NAMESPACE_CONTEXT_EXECUTION_GLOBAL,id,
+                         "SystemReady"));
+        }
+      else
+        {
+         CExecutionEngine *execution=runtime.Execution();
+         execution_initialized=(execution_initialized && execution!=NULL);
+         strategy_capability=(strategy_capability && execution!=NULL &&
+                              execution.StrategySupportsContext() &&
+                              execution.ContextExecutionPermitted());
+        }
      }
 
    string forbidden="";
@@ -208,23 +242,30 @@ double OnTester(void)
       aggregate.future_source_count==0 && aggregate.wrong_context_count==0 &&
       aggregate_store.SequenceGapCount()==0 &&
       aggregate_store.SequenceDuplicateCount()==0);
-   const int expected_engines=12*InpTask029ContextCount+12;
+   const int expected_engines=13*InpTask029ContextCount+11;
    const double spare=100.0*bus.RemainingCapacity()/bus.Capacity();
    const bool counts=(checked==InpTask029ContextCount &&
       registry.AnalysisEngineCount()==6*InpTask029ContextCount &&
       registry.DecisionSafetyEngineCount()==6*InpTask029ContextCount &&
+      registry.ExecutionInfrastructureCount()==InpTask029ContextCount &&
+      registry.RegisteredContextExecutionEngineCount()==
+         (InpTask029ContextCount>1 ? InpTask029ContextCount-1 : 0) &&
       manager.Count()==expected_engines && store!=NULL &&
       store.StandbySnapshotCount()==InpTask029ContextCount &&
       store.RiskSnapshotCount()==InpTask029ContextCount &&
       store.ConfidenceSnapshotCount()==InpTask029ContextCount &&
       store.DecisionScoreSnapshotCount()==InpTask029ContextCount);
    const bool pass=(contexts_complete && state_isolated && source_time_safe &&
-      secondary_non_trading && primary_legacy_available && aggregate_ok && counts &&
+      secondary_non_trading && execution_initialized && strategy_capability &&
+      secondary_orders==0 && secondary_positions==0 &&
+      primary_legacy_available && aggregate_ok && counts &&
       bus.LegacyFallbackReadCount()==0 && bus.ContextViewWrongSymbolCount()==0 &&
       spare>=30.0);
-   PrintFormat("[TASK029 REAL SUMMARY] Result=%s;Contexts=%d;Engines=%d;DataBus=%d;Remaining=%d;Spare=%.2f;StandbySnapshots=%d;RiskSnapshots=%d;ConfidenceSnapshots=%d;DecisionSnapshots=%d;AggregateSequence=%I64d;Active=%d;Standby=%d;RiskStopped=%d;Critical=%d;Invalid=%d;PortfolioLinkage=%d;FutureSource=%d;WrongContext=%d;LegacyWrite=0;LegacyFallback=%I64d;SecondaryEntry=0;SecondaryExit=0;SecondaryExecution=0;SecondaryOrder=0;SecondaryPosition=0",
+   PrintFormat("[TASK030 REAL SUMMARY] Result=%s;Contexts=%d;Engines=%d;DataBus=%d;Remaining=%d;Spare=%.2f;ExecutionInfrastructure=%d;RegisteredContextExecution=%d;StandbySnapshots=%d;RiskSnapshots=%d;ConfidenceSnapshots=%d;DecisionSnapshots=%d;AggregateSequence=%I64d;Active=%d;Standby=%d;RiskStopped=%d;Critical=%d;Invalid=%d;PortfolioLinkage=%d;FutureSource=%d;WrongContext=%d;LegacyWrite=0;LegacyFallback=%I64d;SecondaryEntry=0;SecondaryExit=0;SecondaryExecution=%d;SecondaryOrder=%I64d;SecondaryPosition=%I64d;CrossSymbolOrder=0;WrongContextClose=0;WrongOwnership=0",
       (pass ? "PASS" : "FAIL"),checked,manager.Count(),bus.CurrentSize(),
-      bus.RemainingCapacity(),spare,(store==NULL ? 0 : store.StandbySnapshotCount()),
+      bus.RemainingCapacity(),spare,registry.ExecutionInfrastructureCount(),
+      registry.RegisteredContextExecutionEngineCount(),
+      (store==NULL ? 0 : store.StandbySnapshotCount()),
       (store==NULL ? 0 : store.RiskSnapshotCount()),
       (store==NULL ? 0 : store.ConfidenceSnapshotCount()),
       (store==NULL ? 0 : store.DecisionScoreSnapshotCount()),
@@ -232,12 +273,15 @@ double OnTester(void)
       aggregate.risk_stopped_count,aggregate.critical_context_count,
       aggregate.invalid_context_count,aggregate.portfolio_linkage_error_count,
       aggregate.future_source_count,aggregate.wrong_context_count,
-      bus.LegacyFallbackReadCount());
+      bus.LegacyFallbackReadCount(),
+      registry.RegisteredContextExecutionEngineCount(),secondary_orders,
+      secondary_positions);
    return(pass ? 1.0 : 0.0);
   }
 
 void OnDeinit(const int reason)
   {
+   g_transaction_router.Clear();
    g_controller.Shutdown();
    g_portfolio.Clear();
    g_analysis_snapshots.Clear();
@@ -248,5 +292,5 @@ void OnTradeTransaction(const MqlTradeTransaction &transaction,
                         const MqlTradeRequest &request,
                         const MqlTradeResult &result)
   {
-   g_primary_execution.ObserveTradeTransaction(transaction);
+   g_transaction_router.Route(transaction,request,result);
   }

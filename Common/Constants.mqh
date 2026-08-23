@@ -25,6 +25,8 @@
 #define FENX_DECISION_SAFETY_ENGINES_PER_CONTEXT   6
 #define FENX_DECISION_SAFETY_CONTEXT_KEY_COUNT     116
 #define FENX_ANALYSIS_CONTEXT_KEY_COUNT            67
+#define FENX_EXECUTION_CONTEXT_KEY_COUNT            26
+#define FENX_EXECUTION_ENGINES_PER_SECONDARY_CONTEXT 1
 #define FENX_DATABUS_MINIMUM_SPARE_RATIO           0.30
 
 //--- Canonical context namespaces for analysis facts that historically used
@@ -43,6 +45,7 @@
 #define FENX_DATABUS_NAMESPACE_CONTEXT_STRATEGY_SELECTION_GLOBAL "ContextStrategySelectionGlobal"
 #define FENX_DATABUS_NAMESPACE_CONTEXT_STANDBY_GLOBAL            "ContextStandbyGlobal"
 #define FENX_DATABUS_NAMESPACE_CONTEXT_RISK_GLOBAL               "ContextRiskGlobal"
+#define FENX_DATABUS_NAMESPACE_CONTEXT_EXECUTION_GLOBAL          "ContextExecutionGlobal"
 
 //--- Environment Engine DataBus keys
 #define FENX_DATABUS_KEY_ENVIRONMENT_ATR               "Environment.Volatility.ATR"

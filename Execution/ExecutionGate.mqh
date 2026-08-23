@@ -5,6 +5,7 @@
 #define FENX_EXECUTION_GATE_MQH
 
 #include "../Common/Constants.mqh"
+#include "../Common/Types.mqh"
 #include "../Core/DataBus.mqh"
 #include "../Core/StateManager.mqh"
 
@@ -70,9 +71,12 @@ class CExecutionGate
   {
 private:
    CDataBus      *m_data_bus;
-   CStateManager *m_state_manager;
+   CStateManager *m_global_state_manager;
+   CStateManager *m_context_state_manager;
    string         m_symbol;
+   ENUM_TIMEFRAMES m_timeframe;
    bool           m_execution_enabled;
+   bool           m_context_execution_permitted;
    double         m_maximum_spread_points;
    double         m_minimum_range_score;
    double         m_minimum_strategy_confidence;
@@ -209,9 +213,12 @@ public:
                      CExecutionGate(void)
      {
       m_data_bus=NULL;
-      m_state_manager=NULL;
+      m_global_state_manager=NULL;
+      m_context_state_manager=NULL;
       m_symbol="";
+      m_timeframe=PERIOD_CURRENT;
       m_execution_enabled=false;
+      m_context_execution_permitted=true;
       m_maximum_spread_points=0.0;
       m_minimum_range_score=0.0;
       m_minimum_strategy_confidence=0.0;
@@ -228,9 +235,40 @@ public:
                                const int stale_data_limit_seconds)
      {
       m_data_bus=GetPointer(data_bus);
-      m_state_manager=state_manager;
+      m_global_state_manager=state_manager;
+      m_context_state_manager=state_manager;
       m_symbol=symbol;
+      m_timeframe=(ENUM_TIMEFRAMES)_Period;
       m_execution_enabled=execution_enabled;
+      m_context_execution_permitted=true;
+      m_maximum_spread_points=maximum_spread_points;
+      m_minimum_range_score=minimum_range_score;
+      m_minimum_strategy_confidence=minimum_strategy_confidence;
+      m_minimum_risk_confidence=minimum_risk_confidence;
+      m_stale_data_limit_seconds=stale_data_limit_seconds;
+     }
+
+   //--- Context-aware configuration keeps global emergency state and normal
+   //--- context-local Standby/Risk state as independent mandatory gates.
+   void              ConfigureContext(CDataBus &data_bus,
+                                      CStateManager *global_state_manager,
+                                      CStateManager *context_state_manager,
+                                      const SRuntimeContextId &context_id,
+                                      const bool execution_enabled,
+                                      const bool context_execution_permitted,
+                                      const double maximum_spread_points,
+                                      const double minimum_range_score,
+                                      const double minimum_strategy_confidence,
+                                      const double minimum_risk_confidence,
+                                      const int stale_data_limit_seconds)
+     {
+      m_data_bus=GetPointer(data_bus);
+      m_global_state_manager=global_state_manager;
+      m_context_state_manager=context_state_manager;
+      m_symbol=context_id.symbol;
+      m_timeframe=context_id.timeframe;
+      m_execution_enabled=execution_enabled;
+      m_context_execution_permitted=context_execution_permitted;
       m_maximum_spread_points=maximum_spread_points;
       m_minimum_range_score=minimum_range_score;
       m_minimum_strategy_confidence=minimum_strategy_confidence;
@@ -241,7 +279,9 @@ public:
    bool              Evaluate(const double spread_points,SExecutionGateResult &result)
      {
       ResetResult(result);
-      if(m_data_bus==NULL || m_state_manager==NULL)
+      if(m_data_bus==NULL || m_global_state_manager==NULL ||
+         m_context_state_manager==NULL || StringLen(m_symbol)==0 ||
+         PeriodSeconds(m_timeframe)<=0)
         {
          result.reason="Execution Gate is not initialized.";
          SetStop(result,FENX_PIPELINE_EXECUTION,result.reason,"");
@@ -253,15 +293,21 @@ public:
          SetStop(result,FENX_PIPELINE_EXECUTION,result.reason,"");
          return(false);
         }
-      if(m_symbol!="USDJPY")
+      if(!m_context_execution_permitted)
         {
-         result.reason="Minimal execution supports USDJPY only.";
+         result.reason="Runtime context or strategy capability blocks execution.";
          SetStop(result,FENX_PIPELINE_EXECUTION,result.reason,"");
          return(false);
         }
-      if(m_state_manager.GetState()!=FENX_STATE_NORMAL)
+      if(m_global_state_manager.GetState()!=FENX_STATE_NORMAL)
         {
-         result.reason="Framework state is not NORMAL.";
+         result.reason="Global framework state is not NORMAL.";
+         SetStop(result,FENX_PIPELINE_RISK,result.reason,"");
+         return(false);
+        }
+      if(m_context_state_manager.GetState()!=FENX_STATE_NORMAL)
+        {
+         result.reason="Context-local framework state is not NORMAL.";
          SetStop(result,FENX_PIPELINE_RISK,result.reason,"");
          return(false);
         }
@@ -542,7 +588,8 @@ public:
         }
       result.allowed=true;
       result.execution_gate_allowed=true;
-      result.reason="Execution Gate approved a new USDJPY RANGE mean-reversion entry.";
+      result.reason="Execution Gate approved a new RANGE mean-reversion entry for "+
+                    m_symbol+" "+RuntimeContextTimeframeName(m_timeframe)+".";
       result.stop_stage=FENX_PIPELINE_EXECUTION;
       result.stage_reason=result.reason;
       AppendPass(trace,FENX_PIPELINE_EXECUTION);
