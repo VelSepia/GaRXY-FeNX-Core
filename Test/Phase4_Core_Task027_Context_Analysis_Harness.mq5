@@ -145,40 +145,39 @@ int OnInit(void)
    CDataBus bus;
    CAnalysisContextBinding primary_binding;
    CAnalysisContextBinding secondary_binding;
-   const bool bindings=(primary_binding.Configure(configs[0].id,true) &&
-                        secondary_binding.Configure(configs[1].id,false));
-   const bool primary_write=(bindings && primary_binding.PublishGlobalLegacy(
-      GetPointer(bus),FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"ATR",
-      FENX_DATABUS_KEY_ENVIRONMENT_ATR,"1.111"));
-   const bool secondary_write=(secondary_binding.PublishGlobalLegacy(
-      GetPointer(bus),FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"ATR",
-      FENX_DATABUS_KEY_ENVIRONMENT_ATR,"2.222"));
-   string primary_context="",secondary_context="",legacy="";
+   const bool bindings=(primary_binding.Configure(configs[0].id) &&
+                        secondary_binding.Configure(configs[1].id));
+   const bool primary_write=(bindings && primary_binding.PublishText(
+      GetPointer(bus),FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"ATR","1.111"));
+   const bool secondary_write=(secondary_binding.PublishText(
+      GetPointer(bus),FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"ATR","2.222"));
+   string primary_context="",secondary_context="";
    const bool isolation=(primary_write && secondary_write &&
       bus.TryGetContextText(FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,
                             configs[0].id,"ATR",primary_context) &&
       bus.TryGetContextText(FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,
                             configs[1].id,"ATR",secondary_context) &&
-      bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_ATR,legacy) &&
-      primary_context=="1.111" && secondary_context=="2.222" &&
-      legacy=="1.111");
+      primary_context=="1.111" && secondary_context=="2.222");
    Record(6,"Context DataBus Isolation",isolation);
-   Record(7,"Primary Legacy Alias",legacy==primary_context);
-   Record(8,"Secondary Legacy Denial",legacy!="2.222" &&
-          bus.LegacyFallbackReadCount()==0);
+   Record(7,"Primary Canonical Identity",primary_context=="1.111");
+   Record(8,"Alias-free Schema",bus.LegacySchemaKeyCount()==0 &&
+          bus.LegacyWriteAttemptCount()==0 && bus.LegacyReadAttemptCount()==0);
 
-   const bool selection_primary=primary_binding.PublishSymbolLegacy(
+   const bool selection_primary=primary_binding.PublishSymbol(
       GetPointer(bus),FENX_DATABUS_NAMESPACE_MARKET_SELECTION,
       FENX_DATABUS_FIELD_MARKET_SELECTION_SCORE,"61.00");
-   const bool selection_secondary=secondary_binding.PublishSymbolLegacy(
+   const bool selection_secondary=secondary_binding.PublishSymbol(
       GetPointer(bus),FENX_DATABUS_NAMESPACE_MARKET_SELECTION,
       FENX_DATABUS_FIELD_MARKET_SELECTION_SCORE,"72.00");
-   string secondary_legacy="";
+   string primary_selection="",secondary_selection="";
    Record(9,"Market Selection Per-context",selection_primary && selection_secondary &&
-          !bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,
-                                configs[1].id.symbol,
-                                FENX_DATABUS_FIELD_MARKET_SELECTION_SCORE,
-                                secondary_legacy));
+          bus.TryGetContextText(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,
+                                configs[0].id,FENX_DATABUS_FIELD_MARKET_SELECTION_SCORE,
+                                primary_selection) &&
+          bus.TryGetContextText(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,
+                                configs[1].id,FENX_DATABUS_FIELD_MARKET_SELECTION_SCORE,
+                                secondary_selection) &&
+          primary_selection=="61.00" && secondary_selection=="72.00");
 
    SVolatilitySnapshot h1;
    SVolatilitySnapshot m15;

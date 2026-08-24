@@ -532,8 +532,8 @@ private:
      }
 
    //--- Publishes the completed Task028 shadow result into canonical context
-   //--- keys for Task029 consumers. Legacy Pair Ranking and Allocation keys
-   //--- are never written here; they remain owned by the unchanged path below.
+   //--- keys for Task029 consumers. The retired single-context publication
+   //--- path is never executed while the production typed store is attached.
    bool PublishContextPortfolio(const SGlobalPortfolioSnapshot &portfolio,
                                 SPortfolioCandidateSnapshot &audits[])
      {
@@ -580,9 +580,9 @@ private:
          const SRuntimeContextId context_id=audits[index].context_id;
          const string updated_at=TimeToString(portfolio.updated_at,
                                                TIME_DATE|TIME_SECONDS);
-         //--- Legacy per-symbol records always carry the cycle timestamp even
-         //--- when the symbol is not ranked. Preserve that availability
-         //--- contract for an excluded/unfunded context as well.
+         //--- Per-context records always carry the cycle timestamp even when
+         //--- the symbol is not ranked. Preserve that availability contract
+         //--- for an excluded/unfunded context as well.
          const string ranking_updated_at=updated_at;
          const string allocation_updated_at=TimeToString(
             audits[index].allocation_updated_at,TIME_DATE|TIME_SECONDS);
@@ -880,6 +880,14 @@ public:
       if(!m_initialized)
          return;
 
+      // Task032 production owns allocation through the typed global portfolio.
+      // The retired single-symbol DataBus path is not executed once attached.
+      if(m_portfolio_store!=NULL)
+        {
+         BuildShadowPortfolioAllocation();
+         return;
+        }
+
       SAllocationEnvironment environment;
       SAllocationRankingGlobal ranking_global;
       double environment_freshness=0.0;
@@ -1032,7 +1040,6 @@ public:
       if(!PublishGlobalSnapshot(global_snapshot))
          CLogger::Error("CapitalAllocationEngine could not publish global allocation data.");
 
-      BuildShadowPortfolioAllocation();
      }
 
    virtual void       Shutdown(void)

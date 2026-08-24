@@ -78,28 +78,28 @@ private:
       reason+=value;
      }
 
-   bool ReadText(const string key,string &value)
+   bool ReadText(const string name_space,const string field,string &value)
      {
       value="";
-      return(m_data_bus!=NULL && m_context.ReadEnvironmentLegacy(m_data_bus,key,value) &&
+      return(m_data_bus!=NULL && m_context.ReadText(m_data_bus,name_space,field,value) &&
              StringLen(value)>0);
      }
 
-   bool ReadDouble(const string key,double &value)
+   bool ReadDouble(const string name_space,const string field,double &value)
      {
       string text="";
       value=0.0;
-      if(!ReadText(key,text))
+      if(!ReadText(name_space,field,text))
          return(false);
       value=StringToDouble(text);
       return(true);
      }
 
-   bool ReadBoolean(const string key,bool &value)
+   bool ReadBoolean(const string name_space,const string field,bool &value)
      {
       string text="";
       value=false;
-      if(!ReadText(key,text))
+      if(!ReadText(name_space,field,text))
          return(false);
       if(text=="true" || text=="TRUE")
         {
@@ -111,11 +111,11 @@ private:
       return(false);
      }
 
-   bool ReadTimestamp(const string key,datetime &value)
+   bool ReadTimestamp(const string name_space,const string field,datetime &value)
      {
       string text="";
       value=0;
-      if(!ReadText(key,text))
+      if(!ReadText(name_space,field,text))
          return(false);
       value=StringToTime(text);
       return(value>0);
@@ -149,56 +149,56 @@ private:
       datetime range_closed_bar_time=0;
 
       const bool volatility_available=
-         ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_ATR,snapshot.atr) &&
-         ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_VOLATILITY_SCORE,
-                    snapshot.volatility_score) &&
-         ReadText(FENX_DATABUS_KEY_ENVIRONMENT_VOLATILITY_LEVEL,
-                  snapshot.volatility_level);
+         ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"ATR",snapshot.atr) &&
+         ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"Score",
+                     snapshot.volatility_score) &&
+         ReadText(FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"Level",
+                   snapshot.volatility_level);
 
       const bool range_available=
-         ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_UPPER,snapshot.range_upper) &&
-         ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_LOWER,snapshot.range_lower) &&
-         ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_MIDPOINT,
-                    snapshot.range_midpoint) &&
-         ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_WIDTH_POINTS,
-                    snapshot.range_width_points) &&
-         ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_POSITION,
-                    snapshot.range_position) &&
-         ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_SCORE,snapshot.range_score) &&
-         ReadBoolean(FENX_DATABUS_KEY_ENVIRONMENT_IS_RANGE,snapshot.is_range) &&
-         ReadBoolean(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_DATA_VALID,
-                     range_source_valid) &&
-         ReadTimestamp(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_UPDATED_AT,
-                       snapshot.range_updated_at) &&
-         ReadTimestamp(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_CLOSED_BAR_TIME,
-                       range_closed_bar_time);
+         ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Upper",snapshot.range_upper) &&
+         ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Lower",snapshot.range_lower) &&
+         ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Midpoint",
+                     snapshot.range_midpoint) &&
+         ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"WidthPoints",
+                     snapshot.range_width_points) &&
+         ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Position",
+                     snapshot.range_position) &&
+         ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Score",snapshot.range_score) &&
+         ReadBoolean(FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"IsRange",snapshot.is_range) &&
+         ReadBoolean(FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"IsDataValid",
+                      range_source_valid) &&
+         ReadTimestamp(FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"UpdatedAt",
+                        snapshot.range_updated_at) &&
+         ReadTimestamp(FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"ClosedBarTime",
+                        range_closed_bar_time);
 
       const bool trend_available=
-         ReadText(FENX_DATABUS_KEY_ENVIRONMENT_TREND_DIRECTION,
-                  snapshot.trend_direction) &&
-         ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_TREND_STRENGTH,
-                    snapshot.trend_strength) &&
-         ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_TREND_SCORE,snapshot.trend_score) &&
-         ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_TREND_SLOPE,snapshot.trend_slope) &&
-         ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_TREND_CONFIDENCE,
-                    snapshot.trend_confidence) &&
-         ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_TREND_ADX,snapshot.adx) &&
-         ReadBoolean(FENX_DATABUS_KEY_ENVIRONMENT_IS_TREND,snapshot.is_trend) &&
-         ReadBoolean(FENX_DATABUS_KEY_ENVIRONMENT_TREND_DATA_VALID,
-                     trend_source_valid) &&
-         ReadTimestamp(FENX_DATABUS_KEY_ENVIRONMENT_TREND_UPDATED_AT,
-                       snapshot.trend_updated_at);
+         ReadText(FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Direction",
+                   snapshot.trend_direction) &&
+         ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Strength",
+                     snapshot.trend_strength) &&
+         ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Score",snapshot.trend_score) &&
+         ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Slope",snapshot.trend_slope) &&
+         ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Confidence",
+                     snapshot.trend_confidence) &&
+         ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"ADX",snapshot.adx) &&
+         ReadBoolean(FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"IsTrend",snapshot.is_trend) &&
+         ReadBoolean(FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"IsDataValid",
+                      trend_source_valid) &&
+         ReadTimestamp(FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"UpdatedAt",
+                        snapshot.trend_updated_at);
 
       const bool market_state_available=
-         ReadText(FENX_DATABUS_KEY_ENVIRONMENT_MARKET_STATE,snapshot.market_state) &&
-         ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_MARKET_CONFIDENCE,
-                    snapshot.market_confidence) &&
-         ReadText(FENX_DATABUS_KEY_ENVIRONMENT_RECOMMENDED_STYLE,
-                  snapshot.recommended_style) &&
-         ReadText(FENX_DATABUS_KEY_ENVIRONMENT_RECOMMENDED_RISK,
-                  snapshot.recommended_risk) &&
-         ReadTimestamp(FENX_DATABUS_KEY_ENVIRONMENT_MARKET_UPDATED_AT,
-                       snapshot.market_state_updated_at);
+         ReadText(FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,"State",snapshot.market_state) &&
+         ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,"Confidence",
+                     snapshot.market_confidence) &&
+         ReadText(FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,"RecommendedTradingStyle",
+                   snapshot.recommended_style) &&
+         ReadText(FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,"RecommendedRiskLevel",
+                   snapshot.recommended_risk) &&
+         ReadTimestamp(FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,"UpdatedAt",
+                        snapshot.market_state_updated_at);
 
       // VolatilityAnalyzer has no public timestamp in the legacy contract.
       // Range, Trend, and Market State all consume its current facts earlier in
@@ -333,98 +333,6 @@ private:
       return(SameSnapshot(snapshot,stored));
      }
 
-   bool PublishField(const string field,const string value)
-     {
-      if(m_data_bus==NULL ||
-         !m_context.PublishSymbolLegacy(m_data_bus,
-             FENX_DATABUS_NAMESPACE_COMMON_ENVIRONMENT,field,value))
-         return(false);
-
-      // Verify every serialized field on the first complete publication only.
-      // Later ticks avoid the extra linear DataBus reads.
-      if(!m_consistency_logged)
-        {
-         string stored="";
-         if(!m_context.ReadSymbolLegacy(m_data_bus,
-               FENX_DATABUS_NAMESPACE_COMMON_ENVIRONMENT,field,stored) ||
-            stored!=value)
-            return(false);
-        }
-      return(true);
-     }
-
-   bool PublishSnapshot(const SEnvironmentSnapshot &snapshot)
-     {
-      const int digits=(int)SymbolInfoInteger(m_context.Symbol(),SYMBOL_DIGITS);
-      bool success=true;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_VALID,
-                       (snapshot.is_valid ? "true" : "false"))) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_FRESH,
-                       (snapshot.is_fresh ? "true" : "false"))) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_VERSION,
-                       snapshot.snapshot_version)) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_UPDATED_AT,
-                       TimeToString(snapshot.updated_at,
-                                    TIME_DATE|TIME_SECONDS))) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_INVALID_REASON,
-                       snapshot.invalid_reason)) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_SYMBOL,
-                       snapshot.symbol)) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_TIMEFRAME,
-                       snapshot.timeframe)) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_VOLATILITY_VALID,
-                       (snapshot.volatility_valid ? "true" : "false"))) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RANGE_VALID,
-                       (snapshot.range_valid ? "true" : "false"))) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_TREND_VALID,
-                       (snapshot.trend_valid ? "true" : "false"))) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_MARKET_STATE_VALID,
-                       (snapshot.market_state_valid ? "true" : "false"))) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_ATR,
-                       DoubleToString(snapshot.atr,digits))) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_VOLATILITY_SCORE,
-                       DoubleToString(snapshot.volatility_score,2))) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_VOLATILITY_LEVEL,
-                       snapshot.volatility_level)) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RANGE_UPPER,
-                       DoubleToString(snapshot.range_upper,digits))) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RANGE_LOWER,
-                       DoubleToString(snapshot.range_lower,digits))) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RANGE_MIDPOINT,
-                       DoubleToString(snapshot.range_midpoint,digits))) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RANGE_WIDTH_POINTS,
-                       DoubleToString(snapshot.range_width_points,2))) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RANGE_POSITION,
-                       DoubleToString(snapshot.range_position,4))) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RANGE_SCORE,
-                       DoubleToString(snapshot.range_score,2))) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_IS_RANGE,
-                       (snapshot.is_range ? "true" : "false"))) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_TREND_DIRECTION,
-                       snapshot.trend_direction)) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_TREND_STRENGTH,
-                       DoubleToString(snapshot.trend_strength,2))) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_TREND_SCORE,
-                       DoubleToString(snapshot.trend_score,2))) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_TREND_SLOPE,
-                       DoubleToString(snapshot.trend_slope,4))) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_TREND_CONFIDENCE,
-                       DoubleToString(snapshot.trend_confidence,2))) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_ADX,
-                       DoubleToString(snapshot.adx,2))) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_IS_TREND,
-                       (snapshot.is_trend ? "true" : "false"))) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_MARKET_STATE,
-                       snapshot.market_state)) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_MARKET_CONFIDENCE,
-                       DoubleToString(snapshot.market_confidence,2))) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RECOMMENDED_STYLE,
-                       snapshot.recommended_style)) success=false;
-      if(!PublishField(FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RECOMMENDED_RISK,
-                       snapshot.recommended_risk)) success=false;
-      return(success);
-     }
-
 public:
                      CEnvironmentEngine(void)
      {
@@ -438,11 +346,9 @@ public:
       m_snapshot_count=0;
      }
 
-   bool              SetRuntimeContext(const SRuntimeContextId &context_id,
-                                       const bool publish_primary_legacy)
+   bool              SetRuntimeContext(const SRuntimeContextId &context_id)
      {
-      return(!m_initialized &&
-             m_context.Configure(context_id,publish_primary_legacy));
+      return(!m_initialized && m_context.Configure(context_id));
      }
 
    //--- Injects the non-owning typed store before framework initialization.
@@ -491,18 +397,12 @@ public:
          return;
         }
       m_snapshot_count++;
-      if(!PublishSnapshot(snapshot))
-        {
-         CLogger::Error("EnvironmentEngine could not publish its shadow snapshot.");
-         return;
-        }
-
-      if(!m_consistency_logged)
-        {
-         CLogger::Info(StringFormat(
-            "[COMMON_SNAPSHOT] typed_databus_consistency=PASS;symbol=%s;timeframe=%s;store_count=%d;keys=%d",
+       if(!m_consistency_logged)
+         {
+          CLogger::Info(StringFormat(
+             "[COMMON_SNAPSHOT] typed_store_consistency=PASS;symbol=%s;timeframe=%s;store_count=%d;keys=%d",
             snapshot.symbol,snapshot.timeframe,m_snapshot_store.Count(),
-            FENX_COMMON_ENVIRONMENT_KEY_COUNT));
+             FENX_COMMON_ENVIRONMENT_KEY_COUNT));
          m_consistency_logged=true;
         }
 

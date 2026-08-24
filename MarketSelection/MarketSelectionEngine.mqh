@@ -70,13 +70,13 @@ private:
       return(MathMax(0.0,MathMin(100.0,value)));
      }
 
-   bool ReadDouble(const string key,double &value)
+   bool ReadDouble(const string name_space,const string field,double &value)
      {
       if(m_data_bus==NULL)
          return(false);
 
       string text="";
-      if(!m_context.ReadEnvironmentLegacy(m_data_bus,key,text) ||
+      if(!m_context.ReadText(m_data_bus,name_space,field,text) ||
          StringLen(text)==0)
          return(false);
 
@@ -84,13 +84,13 @@ private:
       return(true);
      }
 
-   bool ReadBoolean(const string key,bool &value)
+   bool ReadBoolean(const string name_space,const string field,bool &value)
      {
       if(m_data_bus==NULL)
          return(false);
 
       string text="";
-      if(!m_context.ReadEnvironmentLegacy(m_data_bus,key,text))
+      if(!m_context.ReadText(m_data_bus,name_space,field,text))
          return(false);
 
       if(text=="true" || text=="TRUE")
@@ -112,21 +112,20 @@ private:
       if(m_data_bus==NULL)
          return(false);
 
-      if(!ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_ATR,environment.atr) ||
-         !ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_VOLATILITY_SCORE,
+      if(!ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"ATR",environment.atr) ||
+         !ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"Score",
                      environment.volatility_score) ||
-         !ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_SCORE,environment.range_score) ||
-         !ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_TREND_SCORE,environment.trend_score) ||
-         !ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_MARKET_CONFIDENCE,
+         !ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Score",environment.range_score) ||
+         !ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Score",environment.trend_score) ||
+         !ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,"Confidence",
                      environment.market_confidence) ||
-         !ReadBoolean(FENX_DATABUS_KEY_ENVIRONMENT_IS_RANGE,environment.is_range) ||
-         !ReadBoolean(FENX_DATABUS_KEY_ENVIRONMENT_IS_TREND,environment.is_trend) ||
-         !ReadBoolean(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_DATA_VALID,
-                      environment.range_data_valid) ||
-         !ReadBoolean(FENX_DATABUS_KEY_ENVIRONMENT_TREND_DATA_VALID,
-                      environment.trend_data_valid) ||
-         !m_context.ReadEnvironmentLegacy(m_data_bus,
-             FENX_DATABUS_KEY_ENVIRONMENT_MARKET_STATE,
+         !ReadBoolean(FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"IsRange",environment.is_range) ||
+         !ReadBoolean(FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"IsTrend",environment.is_trend) ||
+         !ReadBoolean(FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"IsDataValid",
+                       environment.range_data_valid) ||
+         !ReadBoolean(FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"IsDataValid",
+                       environment.trend_data_valid) ||
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,"State",
              environment.market_state))
          return(false);
 
@@ -290,41 +289,41 @@ private:
          return(false);
 
       bool success=true;
-      if(!m_context.PublishSymbolLegacyFor(m_data_bus,
+      if(!m_context.PublishSymbolFor(m_data_bus,
              FENX_DATABUS_NAMESPACE_MARKET_SELECTION,snapshot.symbol,
              FENX_DATABUS_FIELD_MARKET_SELECTION_SYMBOL,snapshot.symbol))
          success=false;
-      if(!m_context.PublishSymbolLegacyFor(m_data_bus,
+      if(!m_context.PublishSymbolFor(m_data_bus,
              FENX_DATABUS_NAMESPACE_MARKET_SELECTION,snapshot.symbol,
              FENX_DATABUS_FIELD_MARKET_SELECTION_IS_ELIGIBLE,
              (snapshot.is_eligible ? "true" : "false")))
          success=false;
-      if(!m_context.PublishSymbolLegacyFor(m_data_bus,
+      if(!m_context.PublishSymbolFor(m_data_bus,
              FENX_DATABUS_NAMESPACE_MARKET_SELECTION,snapshot.symbol,
              FENX_DATABUS_FIELD_MARKET_SELECTION_SCORE,
              DoubleToString(snapshot.score,2)))
          success=false;
-      if(!m_context.PublishSymbolLegacyFor(m_data_bus,
+      if(!m_context.PublishSymbolFor(m_data_bus,
              FENX_DATABUS_NAMESPACE_MARKET_SELECTION,snapshot.symbol,
              FENX_DATABUS_FIELD_MARKET_SELECTION_CONFIDENCE,
              DoubleToString(snapshot.confidence,2)))
          success=false;
-      if(!m_context.PublishSymbolLegacyFor(m_data_bus,
+      if(!m_context.PublishSymbolFor(m_data_bus,
              FENX_DATABUS_NAMESPACE_MARKET_SELECTION,snapshot.symbol,
              FENX_DATABUS_FIELD_MARKET_SELECTION_SPREAD_POINTS,
              DoubleToString(snapshot.spread_points,2)))
          success=false;
-      if(!m_context.PublishSymbolLegacyFor(m_data_bus,
+      if(!m_context.PublishSymbolFor(m_data_bus,
              FENX_DATABUS_NAMESPACE_MARKET_SELECTION,snapshot.symbol,
              FENX_DATABUS_FIELD_MARKET_SELECTION_SPREAD_ATR,
              DoubleToString(snapshot.spread_to_atr_ratio,4)))
          success=false;
-      if(!m_context.PublishSymbolLegacyFor(m_data_bus,
+      if(!m_context.PublishSymbolFor(m_data_bus,
              FENX_DATABUS_NAMESPACE_MARKET_SELECTION,snapshot.symbol,
              FENX_DATABUS_FIELD_MARKET_SELECTION_REJECTION,
              snapshot.rejection_reason))
          success=false;
-      if(!m_context.PublishSymbolLegacyFor(m_data_bus,
+      if(!m_context.PublishSymbolFor(m_data_bus,
              FENX_DATABUS_NAMESPACE_MARKET_SELECTION,snapshot.symbol,
              FENX_DATABUS_FIELD_MARKET_SELECTION_UPDATED_AT,
              TimeToString(snapshot.updated_at,TIME_DATE|TIME_SECONDS)))
@@ -372,11 +371,9 @@ public:
       m_snapshot_count=0;
      }
 
-   bool              SetRuntimeContext(const SRuntimeContextId &context_id,
-                                       const bool publish_primary_legacy)
+   bool              SetRuntimeContext(const SRuntimeContextId &context_id)
      {
-      return(!m_initialized &&
-             m_context.Configure(context_id,publish_primary_legacy));
+      return(!m_initialized && m_context.Configure(context_id));
      }
 
    virtual bool       Initialize(CDataBus &data_bus,CParameterManager &parameters)

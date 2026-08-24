@@ -372,7 +372,9 @@ int OnInit(void)
           g_full.Store().DuplicateSymbolCandidateCount()==0);
    Record(17,"Secondary Remains Non-trading",candidates[eur].trade_enabled==false &&
           candidates[gbp].trade_enabled==false && candidates[aud].trade_enabled==false);
-   Record(18,"Typed Store Only",g_full.Bus().LegacyFallbackReadCount()==0);
+   Record(18,"Typed Store Only",g_full.Bus().LegacySchemaKeyCount()==0 &&
+          g_full.Bus().LegacyWriteAttemptCount()==0 &&
+          g_full.Bus().LegacyReadAttemptCount()==0);
    Record(19,"Final Snapshot Valid",full.ranking_valid && full.allocation_valid &&
           full.is_valid && full.is_fresh);
    return(INIT_SUCCEEDED);

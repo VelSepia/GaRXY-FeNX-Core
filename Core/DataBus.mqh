@@ -13,15 +13,11 @@ class CDataBus
   {
 private:
    SDataBusItem m_items[];
-   SRuntimeContextId m_primary_context;
-   bool              m_primary_context_configured;
-   bool              m_legacy_alias_write_enabled;
-   bool              m_legacy_fallback_read_enabled;
-   long              m_legacy_alias_write_count;
-   long              m_legacy_fallback_read_count;
    bool              m_context_view_active;
    SRuntimeContextId m_context_view_id;
    long              m_context_view_wrong_symbol_count;
+   long              m_legacy_write_attempt_count;
+   long              m_legacy_read_attempt_count;
 
    bool RawSetText(const string key,const string value)
      {
@@ -63,10 +59,9 @@ private:
       return(true);
      }
 
-   //--- Maps only the established global keys consumed/published by the six
-   //--- Task029 engines. Per-symbol APIs are handled separately and canonical
-   //--- context keys always bypass this compatibility translation.
-   bool MapContextGlobalKey(const string key,string &name_space,string &field)
+   //--- Resolves the established field constants used by context-bound engines.
+   //--- Storage always uses the canonical namespace.symbol.timeframe.field key.
+   bool MapContextField(const string key,string &name_space,string &field)
      {
       string prefix="";
       if(StringFind(key,"Environment.Volatility.")==0)
@@ -158,16 +153,22 @@ private:
       return(-1);
      }
 
-   string BuildSymbolKey(const string name_space,const string symbol,const string field)
+   int DelimiterCount(const string key)
      {
-      if(StringLen(name_space)==0 || StringLen(symbol)==0 || StringLen(field)==0)
-         return("");
-
-      return(name_space+"."+symbol+"."+field);
+      int count=0;
+      for(int index=0;index<StringLen(key);index++)
+         if(StringGetCharacter(key,index)=='.') count++;
+      return(count);
      }
 
-   //--- Escapes only the key delimiter and the escape marker. Existing legacy
-   //--- keys are intentionally not escaped, preserving their exact schema.
+   bool IsGlobalSchemaKey(const string key)
+     {
+      const int length=StringLen(key);
+      return(length>2 && StringSubstr(key,0,1)!="." &&
+             StringSubstr(key,length-1,1)!="." && DelimiterCount(key)==1);
+     }
+
+   //--- Escapes only the key delimiter and the escape marker.
    string EscapeKeySegment(const string segment)
      {
       string escaped=segment;
@@ -176,20 +177,9 @@ private:
       return(escaped);
      }
 
-   bool IsPrimaryContext(const SRuntimeContextId &context_id)
+   int RequiredNewEntries(const string key)
      {
-      return(m_primary_context_configured &&
-             RuntimeContextEquals(m_primary_context,context_id));
-     }
-
-   int RequiredNewEntries(const string first_key,const string second_key="")
-     {
-      int required=0;
-      if(StringLen(first_key)>0 && FindIndex(first_key)<0)
-         required++;
-      if(StringLen(second_key)>0 && second_key!=first_key && FindIndex(second_key)<0)
-         required++;
-      return(required);
+      return(StringLen(key)>0 && FindIndex(key)<0 ? 1 : 0);
      }
 
    bool ParseBooleanText(const string text,bool &value)
@@ -210,17 +200,12 @@ private:
 public:
                      CDataBus(void)
      {
-      m_primary_context.symbol="";
-      m_primary_context.timeframe=PERIOD_CURRENT;
-      m_primary_context_configured=false;
-      m_legacy_alias_write_enabled=false;
-      m_legacy_fallback_read_enabled=false;
-      m_legacy_alias_write_count=0;
-      m_legacy_fallback_read_count=0;
       m_context_view_active=false;
       m_context_view_id.symbol="";
       m_context_view_id.timeframe=PERIOD_CURRENT;
       m_context_view_wrong_symbol_count=0;
+      m_legacy_write_attempt_count=0;
+      m_legacy_read_attempt_count=0;
      }
 
    //--- Produces the canonical namespace.symbol.timeframe.field identity.
@@ -249,59 +234,19 @@ public:
       return(EscapeKeySegment(name_space)+"."+EscapeKeySegment(field));
      }
 
-   //--- Enables temporary primary-context compatibility. Secondary contexts
-   //--- never qualify for alias writes or legacy fallback reads.
-   bool ConfigureLegacyAlias(const SRuntimeContextId &primary_context,
-                             const bool alias_write_enabled,
-                             const bool fallback_read_enabled)
-     {
-      if(!IsValidRuntimeContextId(primary_context) ||
-         (fallback_read_enabled && !alias_write_enabled))
-         return(false);
-
-      m_primary_context=primary_context;
-      m_primary_context_configured=true;
-      m_legacy_alias_write_enabled=alias_write_enabled;
-      m_legacy_fallback_read_enabled=fallback_read_enabled;
-      return(true);
-     }
-
-   void DisableLegacyAlias(void)
-     {
-      m_legacy_alias_write_enabled=false;
-      m_legacy_fallback_read_enabled=false;
-     }
-
-   bool LegacyAliasWriteEnabled(void)
-     {
-      return(m_legacy_alias_write_enabled);
-     }
-
-   bool LegacyFallbackReadEnabled(void)
-     {
-      return(m_legacy_fallback_read_enabled);
-     }
-
-   long LegacyAliasWriteCount(void)
-     {
-      return(m_legacy_alias_write_count);
-     }
-
-   long LegacyFallbackReadCount(void)
-     {
-      return(m_legacy_fallback_read_count);
-     }
-
    bool SetText(const string key,const string value)
      {
       if(m_context_view_active)
         {
          string name_space="";
          string field="";
-         if(MapContextGlobalKey(key,name_space,field))
+         if(MapContextField(key,name_space,field))
             return(RawSetContextText(name_space,m_context_view_id,field,value));
         }
-      return(RawSetText(key,value));
+      if(IsGlobalSchemaKey(key))
+         return(RawSetText(key,value));
+      m_legacy_write_attempt_count++;
+      return(false);
      }
 
    bool TryGetText(const string key,string &value)
@@ -310,10 +255,13 @@ public:
         {
          string name_space="";
          string field="";
-         if(MapContextGlobalKey(key,name_space,field))
+         if(MapContextField(key,name_space,field))
             return(RawTryGetContextText(name_space,m_context_view_id,field,value));
         }
-      return(RawTryGetText(key,value));
+      if(IsGlobalSchemaKey(key))
+         return(RawTryGetText(key,value));
+      m_legacy_read_attempt_count++;
+      return(false);
      }
 
    bool SetSymbolText(const string name_space,const string symbol,const string field,
@@ -328,14 +276,8 @@ public:
            }
          return(RawSetContextText(name_space,m_context_view_id,field,value));
         }
-      const string key=BuildSymbolKey(name_space,symbol,field);
-      if(StringLen(key)==0)
-        {
-         CLogger::Warning("DataBus rejected an incomplete per-symbol key.");
-         return(false);
-        }
-
-      return(RawSetText(key,value));
+      m_legacy_write_attempt_count++;
+      return(false);
      }
 
    bool TryGetSymbolText(const string name_space,const string symbol,const string field,
@@ -350,16 +292,13 @@ public:
            }
          return(RawTryGetContextText(name_space,m_context_view_id,field,value));
         }
-      const string key=BuildSymbolKey(name_space,symbol,field);
-      if(StringLen(key)==0)
-         return(false);
-
-      return(RawTryGetText(key,value));
+      m_legacy_read_attempt_count++;
+      return(false);
      }
 
    //--- EngineManager activates this view only for Task029 context instances.
    //--- It is deliberately non-nestable so an early lifecycle error cannot
-   //--- silently redirect a following legacy engine.
+   //--- silently redirect a following context-bound engine.
    bool BeginContextView(const SRuntimeContextId &context_id)
      {
       if(m_context_view_active || !IsValidRuntimeContextId(context_id))
@@ -391,8 +330,8 @@ public:
       return(m_context_view_wrong_symbol_count);
      }
 
-   //--- Stores a canonical context value and, only for the configured primary
-   //--- context, optionally mirrors it to the existing per-symbol legacy key.
+   //--- Stores exactly one canonical context value. Task032 permanently
+   //--- removes primary alias writes and all legacy fallback behavior.
    bool SetContextText(const string name_space,const SRuntimeContextId &context_id,
                        const string field,const string value)
      {
@@ -403,45 +342,23 @@ public:
          return(false);
         }
 
-      const bool write_legacy=(m_legacy_alias_write_enabled &&
-                               IsPrimaryContext(context_id));
-      const string legacy_key=(write_legacy ?
-         BuildSymbolKey(name_space,context_id.symbol,field) : "");
-      if(!CanReserve(RequiredNewEntries(context_key,legacy_key)))
+      if(!CanReserve(RequiredNewEntries(context_key)))
         {
          CLogger::Error("DataBus capacity cannot satisfy a context write.");
          return(false);
         }
 
-      if(!RawSetText(context_key,value))
-         return(false);
-      if(write_legacy)
-        {
-         if(!RawSetText(legacy_key,value))
-            return(false);
-         m_legacy_alias_write_count++;
-        }
-      return(true);
+      return(RawSetText(context_key,value));
      }
 
-   //--- Reads the canonical key first. A legacy read is possible only for the
-   //--- configured primary context, so secondary contexts cannot cross-read it.
+   //--- Reads only the canonical key. Missing context data fails closed.
    bool TryGetContextText(const string name_space,const SRuntimeContextId &context_id,
                           const string field,string &value)
      {
       const string context_key=BuildContextKey(name_space,context_id,field);
       if(StringLen(context_key)==0)
          return(false);
-      if(RawTryGetText(context_key,value))
-         return(true);
-
-      if(!m_legacy_fallback_read_enabled || !IsPrimaryContext(context_id))
-         return(false);
-
-      if(!TryGetSymbolText(name_space,context_id.symbol,field,value))
-         return(false);
-      m_legacy_fallback_read_count++;
-      return(true);
+      return(RawTryGetText(context_key,value));
      }
 
    bool SetContextInt(const string name_space,const SRuntimeContextId &context_id,
@@ -583,15 +500,39 @@ public:
       return(CurrentSize());
      }
 
+   //--- Task032 schema audit. Canonical context keys have three delimiters;
+   //--- formal global keys have one. Two-delimiter keys are retired aliases.
+   int LegacySchemaKeyCount(void)
+     {
+      int count=0;
+      for(int index=0;index<ArraySize(m_items);index++)
+         if(DelimiterCount(m_items[index].key)==2) count++;
+      return(count);
+     }
+
+   int InvalidSchemaKeyCount(void)
+     {
+      int count=0;
+      for(int index=0;index<ArraySize(m_items);index++)
+        {
+         const int delimiters=DelimiterCount(m_items[index].key);
+         if(delimiters!=1 && delimiters!=3) count++;
+        }
+      return(count);
+     }
+
+   long LegacyWriteAttemptCount(void) { return(m_legacy_write_attempt_count); }
+   long LegacyReadAttemptCount(void) { return(m_legacy_read_attempt_count); }
+
    void Clear(void)
      {
       ArrayFree(m_items);
-      m_legacy_alias_write_count=0;
-      m_legacy_fallback_read_count=0;
       m_context_view_active=false;
       m_context_view_id.symbol="";
       m_context_view_id.timeframe=PERIOD_CURRENT;
       m_context_view_wrong_symbol_count=0;
+      m_legacy_write_attempt_count=0;
+      m_legacy_read_attempt_count=0;
      }
   };
 

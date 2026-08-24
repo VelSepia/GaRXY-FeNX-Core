@@ -35,9 +35,8 @@ public:
       m_runtime_recovery_health_prepared=false;
      }
 
-   //--- Creates context-owned analysis instances before registration. The
-   //--- conservative preflight includes legacy migration keys and reserves at
-   //--- least 30% of DataBus capacity for subsequent Common engines.
+   //--- Creates context-owned analysis instances before registration and
+   //--- reserves at least 30% of DataBus capacity for subsequent engines.
    bool              PrepareRuntimeContexts(CParameterManager &parameters,
                                             CCommonSnapshotStore &snapshot_store,
                                             const bool validate_broker_symbols=true)
@@ -182,8 +181,8 @@ public:
          return(true);
         }
 
-      // Legacy harnesses that do not promote analysis engines retain the
-      // Task026 registry-only initialization path.
+      // Registry-only harnesses that do not promote analysis engines retain
+      // the Task026 initialization path.
       if(!m_runtime_context_registry.IsInitialized() &&
          !m_runtime_context_registry.Initialize(parameters,true))
         {
@@ -254,6 +253,19 @@ public:
         }
 
       return(m_engine_manager.Register(engine));
+     }
+
+   //--- Retains the established Primary registration positions while binding
+   //--- every DataBus access to the formal Symbol+Timeframe identity.
+   bool              RegisterPrimaryContextEngine(IEngine &engine)
+     {
+      if(m_initialized || !m_runtime_contexts_prepared)
+         return(false);
+      CRuntimeContext *primary=m_runtime_context_registry.Primary();
+      if(primary==NULL || !primary.IsAvailable())
+         return(false);
+      return(m_engine_manager.RegisterContextDataView(
+                engine,primary.Id(),m_state_manager,RUNMODE_TICK));
      }
 
    void              Update(void)

@@ -138,7 +138,7 @@ double OnTester(void)
    bool identities=true;
    bool updates=true;
    bool handles=(registry.IndicatorHandleCount()==available*3);
-   bool legacy_denial=true;
+   bool canonical_isolation=true;
    CRuntimeContext *primary=registry.Primary();
    const string primary_symbol=(primary==NULL ? "" : primary.Id().symbol);
    for(int index=0;index<registry.Count();index++)
@@ -169,20 +169,17 @@ double OnTester(void)
                runtime.MarketSelection().UpdateCount()>0);
       if(index>0 && id.symbol!=primary_symbol)
         {
-         string forbidden="";
-         legacy_denial=(legacy_denial &&
-            !bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_COMMON_ENVIRONMENT,
-                                  id.symbol,FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_VALID,
-                                  forbidden) &&
-            !bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,
-                                  id.symbol,FENX_DATABUS_FIELD_MARKET_SELECTION_SCORE,
-                                  forbidden) &&
-            !bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_PAIR_RANKING,
-                                  id.symbol,FENX_DATABUS_FIELD_PAIR_RANKING_SCORE,
-                                  forbidden) &&
-            !bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_CAPITAL_ALLOCATION,
-                                  id.symbol,FENX_DATABUS_FIELD_CAPITAL_ALLOCATION_PERCENT,
-                                  forbidden));
+         string selection_score="",ranking_score="",allocation_percent="";
+         canonical_isolation=(canonical_isolation &&
+            bus.TryGetContextText(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,
+                                  id,FENX_DATABUS_FIELD_MARKET_SELECTION_SCORE,
+                                  selection_score) &&
+            bus.TryGetContextText(FENX_DATABUS_NAMESPACE_PAIR_RANKING,
+                                  id,FENX_DATABUS_FIELD_PAIR_RANKING_SCORE,
+                                  ranking_score) &&
+            bus.TryGetContextText(FENX_DATABUS_NAMESPACE_CAPITAL_ALLOCATION,
+                                  id,FENX_DATABUS_FIELD_CAPITAL_ALLOCATION_PERCENT,
+                                  allocation_percent));
         }
      }
 
@@ -229,12 +226,9 @@ double OnTester(void)
      }
 
    string primary_context_atr="";
-   string primary_legacy_atr="";
-   const bool primary_alias=(primary!=NULL &&
+   const bool primary_canonical=(primary!=NULL &&
       bus.TryGetContextText(FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,
-                            primary.Id(),"ATR",primary_context_atr) &&
-      bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_ATR,primary_legacy_atr) &&
-      primary_context_atr==primary_legacy_atr);
+                            primary.Id(),"ATR",primary_context_atr));
    const double spare_ratio=100.0*bus.RemainingCapacity()/bus.Capacity();
    const bool audits=(g_portfolio.SequenceGapCount()==0 &&
       g_portfolio.SequenceDuplicateCount()==0 &&
@@ -243,14 +237,15 @@ double OnTester(void)
       g_portfolio.DuplicateSymbolCandidateCount()==0 &&
       g_portfolio.AllocationInvariantCount()==0);
    const bool pass=(available==InpTask028ContextCount && identities && updates &&
-      handles && legacy_denial && primary_alias && portfolio_available &&
+      handles && canonical_isolation && primary_canonical && portfolio_available &&
       portfolio.context_count==InpTask028ContextCount &&
       portfolio.candidate_count==active_candidates && linkage && source_time_safe &&
       allocation_safe && !duplicate_candidate && !duplicate_allocation &&
       auxiliary_tf_excluded && portfolio.total_allocation<=100.0001 && audits &&
       g_portfolio.CandidateEvaluationCount()>0 &&
       g_portfolio.AllocationEvaluationCount()>0 &&
-      bus.LegacyFallbackReadCount()==0 && spare_ratio>=30.0);
+      bus.LegacySchemaKeyCount()==0 && bus.LegacyWriteAttemptCount()==0 &&
+      bus.LegacyReadAttemptCount()==0 && spare_ratio>=30.0);
    PrintFormat("[TASK028 REAL SUMMARY] Result=%s;Contexts=%d;Engines=%d;Handles=%d;DataBus=%d;Remaining=%d;Spare=%.2f;Snapshots=%d;PortfolioSequence=%I64d;PortfolioEvaluations=%I64d;CandidateEvaluations=%I64d;AllocationEvaluations=%I64d;MaxCandidates=%d;MaxAllocated=%d;MaxTotalAllocation=%.4f;Candidates=%d;Eligible=%d;Allocated=%d;TotalAllocation=%.4f;DuplicateContexts=%d;DuplicateCandidates=%d;RankingRuntimeUs=%I64d;AllocationRuntimeUs=%I64d;TotalRankingRuntimeUs=%I64d;TotalAllocationRuntimeUs=%I64d;SequenceGap=%I64d;SequenceDuplicate=%I64d;FutureSource=%I64d;WrongLinkage=%I64d;AllocationInvariant=%I64d;SecondaryLegacy=%d;Fallback=%d;SecondaryTradingStyle=0;SecondaryStrategy=0;SecondaryStandby=0;SecondaryRisk=0;SecondaryConfidence=0;SecondaryDecision=0;SecondaryEntry=0;SecondaryExit=0;SecondaryExecution=0;SecondaryOrder=0;SecondaryPosition=0",
                (pass ? "PASS" : "FAIL"),available,
                registry.AnalysisEngineCount()+11,registry.IndicatorHandleCount(),
@@ -269,8 +264,8 @@ double OnTester(void)
                g_portfolio.TotalAllocationRuntimeMicroseconds(),
                g_portfolio.SequenceGapCount(),g_portfolio.SequenceDuplicateCount(),
                g_portfolio.FutureSourceCount(),g_portfolio.WrongContextLinkageCount(),
-               g_portfolio.AllocationInvariantCount(),(legacy_denial ? 0 : 1),
-               bus.LegacyFallbackReadCount());
+               g_portfolio.AllocationInvariantCount(),(canonical_isolation ? 0 : 1),
+               bus.LegacyReadAttemptCount());
    return(pass ? 1.0 : 0.0);
   }
 

@@ -844,6 +844,14 @@ public:
       if(!m_initialized)
          return;
 
+      // Task032 production owns ranking through the typed global portfolio.
+      // The retired single-symbol DataBus path is not executed once attached.
+      if(m_portfolio_store!=NULL)
+        {
+         BuildShadowPortfolioRanking();
+         return;
+        }
+
       SRankingEnvironment environment;
       double environment_freshness=0.0;
       bool environment_valid=ReadEnvironment(environment);
@@ -946,9 +954,6 @@ public:
       if(!PublishGlobalSnapshot(global_snapshot))
          CLogger::Error("PairRankingEngine could not publish global ranking data.");
 
-      // Shadow publication is intentionally last: no existing calculation,
-      // key, or downstream consumer can observe it during Task028.
-      BuildShadowPortfolioRanking();
      }
 
    virtual void       Shutdown(void)

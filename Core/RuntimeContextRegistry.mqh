@@ -141,8 +141,7 @@ public:
 
    //--- The runtime context is the sole owner of all six analysis instances.
    //--- EngineManager receives non-owning references only after configuration.
-   bool              PrepareAnalysis(CCommonSnapshotStore &snapshot_store,
-                                     const bool publish_primary_legacy)
+   bool              PrepareAnalysis(CCommonSnapshotStore &snapshot_store)
      {
       if(!m_available)
          return(true);
@@ -150,12 +149,12 @@ public:
          return(true);
 
       const SRuntimeContextId context_id=m_config.id;
-      if(!m_volatility.SetRuntimeContext(context_id,publish_primary_legacy) ||
-         !m_range.SetRuntimeContext(context_id,publish_primary_legacy) ||
-         !m_trend.SetRuntimeContext(context_id,publish_primary_legacy) ||
-         !m_market_state.SetRuntimeContext(context_id,publish_primary_legacy) ||
-         !m_environment.SetRuntimeContext(context_id,publish_primary_legacy) ||
-         !m_market_selection.SetRuntimeContext(context_id,publish_primary_legacy) ||
+      if(!m_volatility.SetRuntimeContext(context_id) ||
+         !m_range.SetRuntimeContext(context_id) ||
+         !m_trend.SetRuntimeContext(context_id) ||
+         !m_market_state.SetRuntimeContext(context_id) ||
+         !m_environment.SetRuntimeContext(context_id) ||
+         !m_market_selection.SetRuntimeContext(context_id) ||
          !m_volatility.SetSnapshotStore(snapshot_store) ||
          !m_range.SetSnapshotStore(snapshot_store) ||
          !m_trend.SetSnapshotStore(snapshot_store) ||
@@ -580,8 +579,7 @@ public:
 
       for(int index=0;index<ArraySize(m_contexts);index++)
         {
-         const bool is_primary=(index==m_primary_index);
-         if(!m_contexts[index].PrepareAnalysis(snapshot_store,is_primary))
+         if(!m_contexts[index].PrepareAnalysis(snapshot_store))
             return(false);
         }
       m_analysis_prepared=true;

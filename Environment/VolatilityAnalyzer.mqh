@@ -58,25 +58,22 @@ private:
          return(false);
 
       const int symbol_digits=(int)SymbolInfoInteger(m_context.Symbol(),SYMBOL_DIGITS);
-      if(!m_context.PublishGlobalLegacy(m_data_bus,
+      if(!m_context.PublishText(m_data_bus,
              FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"ATR",
-             FENX_DATABUS_KEY_ENVIRONMENT_ATR,
              DoubleToString(atr,symbol_digits)))
          return(false);
 
-      if(!m_context.PublishGlobalLegacy(m_data_bus,
+      if(!m_context.PublishText(m_data_bus,
              FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"Score",
-             FENX_DATABUS_KEY_ENVIRONMENT_VOLATILITY_SCORE,
              DoubleToString(score,2)))
          return(false);
 
-      return(m_context.PublishGlobalLegacy(m_data_bus,
-             FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"Level",
-             FENX_DATABUS_KEY_ENVIRONMENT_VOLATILITY_LEVEL,level));
+      return(m_context.PublishText(m_data_bus,
+             FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"Level",level));
      }
 
-   //--- Builds a typed mirror from the values already published to the legacy
-   //--- DataBus. Numeric precision deliberately matches the existing strings,
+   //--- Builds a typed mirror from the values published to the context DataBus.
+   //--- Numeric precision deliberately matches the existing strings,
    //--- so the two interfaces expose exactly the same source facts.
    bool BuildTypedSnapshot(const double atr,const double score,const string level,
                            SVolatilitySnapshot &snapshot)
@@ -131,15 +128,12 @@ private:
       string level_text="";
       const int symbol_digits=(int)SymbolInfoInteger(m_context.Symbol(),SYMBOL_DIGITS);
       if(m_data_bus==NULL ||
-         !m_context.ReadGlobalLegacy(m_data_bus,
-            FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"ATR",
-            FENX_DATABUS_KEY_ENVIRONMENT_ATR,atr_text) ||
-         !m_context.ReadGlobalLegacy(m_data_bus,
-            FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"Score",
-            FENX_DATABUS_KEY_ENVIRONMENT_VOLATILITY_SCORE,score_text) ||
-         !m_context.ReadGlobalLegacy(m_data_bus,
-            FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"Level",
-            FENX_DATABUS_KEY_ENVIRONMENT_VOLATILITY_LEVEL,level_text))
+         !m_context.ReadText(m_data_bus,
+            FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"ATR",atr_text) ||
+         !m_context.ReadText(m_data_bus,
+            FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"Score",score_text) ||
+         !m_context.ReadText(m_data_bus,
+            FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"Level",level_text))
          return(false);
       return(atr_text==DoubleToString(snapshot.atr,symbol_digits) &&
              score_text==DoubleToString(snapshot.volatility_score,2) &&
@@ -162,17 +156,14 @@ public:
       m_snapshot_count=0;
      }
 
-   //--- Binds this instance to one explicit Symbol+Timeframe before handles
-   //--- are created. Only the primary instance may publish legacy aliases.
-   bool              SetRuntimeContext(const SRuntimeContextId &context_id,
-                                       const bool publish_primary_legacy)
+   //--- Binds this instance to one explicit Symbol+Timeframe before handles.
+   bool              SetRuntimeContext(const SRuntimeContextId &context_id)
      {
-      return(!m_initialized &&
-             m_context.Configure(context_id,publish_primary_legacy));
+      return(!m_initialized && m_context.Configure(context_id));
      }
 
    //--- Injects the non-owning typed store before framework initialization.
-   //--- Legacy DataBus publication remains mandatory and authoritative.
+   //--- Canonical context publication remains mandatory and authoritative.
    bool              SetSnapshotStore(CCommonSnapshotStore &snapshot_store)
      {
       if(m_initialized)

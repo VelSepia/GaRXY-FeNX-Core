@@ -67,9 +67,8 @@ private:
          return(false);
 
       string atr_text="";
-      if(!m_context.ReadGlobalLegacy(m_data_bus,
-            FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"ATR",
-            FENX_DATABUS_KEY_ENVIRONMENT_ATR,atr_text))
+      if(!m_context.ReadText(m_data_bus,
+            FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"ATR",atr_text))
          return(false);
 
       atr=StringToDouble(atr_text);
@@ -262,47 +261,47 @@ private:
          return(false);
 
       bool success=true;
-      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
-             "Direction",FENX_DATABUS_KEY_ENVIRONMENT_TREND_DIRECTION,
+      if(!m_context.PublishText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
+             "Direction",
              snapshot.direction))
          success=false;
-      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
-             "Strength",FENX_DATABUS_KEY_ENVIRONMENT_TREND_STRENGTH,
+      if(!m_context.PublishText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
+             "Strength",
              DoubleToString(snapshot.strength,2)))
          success=false;
-      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
-             "Score",FENX_DATABUS_KEY_ENVIRONMENT_TREND_SCORE,
+      if(!m_context.PublishText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
+             "Score",
              DoubleToString(snapshot.score,2)))
          success=false;
-      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
-             "Slope",FENX_DATABUS_KEY_ENVIRONMENT_TREND_SLOPE,
+      if(!m_context.PublishText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
+             "Slope",
              DoubleToString(snapshot.slope_points,4)))
          success=false;
-      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
-             "Confidence",FENX_DATABUS_KEY_ENVIRONMENT_TREND_CONFIDENCE,
+      if(!m_context.PublishText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
+             "Confidence",
              DoubleToString(snapshot.confidence,2)))
          success=false;
-      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
-             "ADX",FENX_DATABUS_KEY_ENVIRONMENT_TREND_ADX,
+      if(!m_context.PublishText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
+             "ADX",
              DoubleToString(snapshot.adx,2)))
          success=false;
-      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
-             "IsTrend",FENX_DATABUS_KEY_ENVIRONMENT_IS_TREND,
+      if(!m_context.PublishText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
+             "IsTrend",
              (snapshot.is_trend ? "true" : "false")))
          success=false;
-      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
-             "IsDataValid",FENX_DATABUS_KEY_ENVIRONMENT_TREND_DATA_VALID,
+      if(!m_context.PublishText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
+             "IsDataValid",
              (snapshot.is_data_valid ? "true" : "false")))
          success=false;
-      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
-             "UpdatedAt",FENX_DATABUS_KEY_ENVIRONMENT_TREND_UPDATED_AT,
+      if(!m_context.PublishText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,
+             "UpdatedAt",
              TimeToString(snapshot.updated_at,TIME_DATE|TIME_SECONDS)))
          success=false;
 
       return(success);
      }
 
-   //--- Completes the typed mirror only after legacy publication. The source
+   //--- Completes the typed mirror only after canonical publication. The source
    //--- values are normalized to the exact existing DataBus precision after
    //--- integrity validation; EMA, ADX, DI, and scores are not recalculated.
    void BuildTypedSnapshot(STrendSnapshot &snapshot,
@@ -373,15 +372,15 @@ private:
       string direction="",strength="",score="",slope="",confidence="";
       string adx="",is_trend="",is_valid="",updated="";
       if(m_data_bus==NULL ||
-         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Direction",FENX_DATABUS_KEY_ENVIRONMENT_TREND_DIRECTION,direction) ||
-         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Strength",FENX_DATABUS_KEY_ENVIRONMENT_TREND_STRENGTH,strength) ||
-         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Score",FENX_DATABUS_KEY_ENVIRONMENT_TREND_SCORE,score) ||
-         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Slope",FENX_DATABUS_KEY_ENVIRONMENT_TREND_SLOPE,slope) ||
-         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Confidence",FENX_DATABUS_KEY_ENVIRONMENT_TREND_CONFIDENCE,confidence) ||
-         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"ADX",FENX_DATABUS_KEY_ENVIRONMENT_TREND_ADX,adx) ||
-         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"IsTrend",FENX_DATABUS_KEY_ENVIRONMENT_IS_TREND,is_trend) ||
-         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"IsDataValid",FENX_DATABUS_KEY_ENVIRONMENT_TREND_DATA_VALID,is_valid) ||
-         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"UpdatedAt",FENX_DATABUS_KEY_ENVIRONMENT_TREND_UPDATED_AT,updated))
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Direction",direction) ||
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Strength",strength) ||
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Score",score) ||
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Slope",slope) ||
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Confidence",confidence) ||
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"ADX",adx) ||
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"IsTrend",is_trend) ||
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"IsDataValid",is_valid) ||
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"UpdatedAt",updated))
          return(false);
 
       return(direction==snapshot.direction &&
@@ -419,15 +418,13 @@ public:
       m_snapshot_count=0;
      }
 
-   bool              SetRuntimeContext(const SRuntimeContextId &context_id,
-                                       const bool publish_primary_legacy)
+   bool              SetRuntimeContext(const SRuntimeContextId &context_id)
      {
-      return(!m_initialized &&
-             m_context.Configure(context_id,publish_primary_legacy));
+      return(!m_initialized && m_context.Configure(context_id));
      }
 
    //--- Injects the non-owning typed store before framework initialization.
-   //--- All trading consumers continue to use legacy Environment.Trend keys.
+   //--- All consumers use the canonical Trend context contract.
    bool              SetSnapshotStore(CCommonSnapshotStore &snapshot_store)
      {
       if(m_initialized)

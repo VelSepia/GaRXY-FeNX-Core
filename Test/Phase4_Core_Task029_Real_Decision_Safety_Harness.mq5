@@ -53,15 +53,15 @@ bool AttachPrimaryStores(void)
 
 bool RegisterPrimaryPipeline(void)
   {
-   return(g_controller.RegisterEngine(g_primary_trading_style) &&
-          g_controller.RegisterEngine(g_primary_strategy_selection) &&
-          g_controller.RegisterEngine(g_primary_standby) &&
-          g_controller.RegisterEngine(g_primary_risk) &&
-          g_controller.RegisterEngine(g_primary_confidence) &&
-          g_controller.RegisterEngine(g_primary_decision) &&
-          g_controller.RegisterEngine(g_primary_execution) &&
-          g_controller.RegisterEngine(g_primary_recovery) &&
-          g_controller.RegisterEngine(g_primary_health));
+   return(g_controller.RegisterPrimaryContextEngine(g_primary_trading_style) &&
+          g_controller.RegisterPrimaryContextEngine(g_primary_strategy_selection) &&
+          g_controller.RegisterPrimaryContextEngine(g_primary_standby) &&
+          g_controller.RegisterPrimaryContextEngine(g_primary_risk) &&
+          g_controller.RegisterPrimaryContextEngine(g_primary_confidence) &&
+          g_controller.RegisterPrimaryContextEngine(g_primary_decision) &&
+          g_controller.RegisterPrimaryContextEngine(g_primary_execution) &&
+          g_controller.RegisterPrimaryContextEngine(g_primary_recovery) &&
+          g_controller.RegisterPrimaryContextEngine(g_primary_health));
   }
 
 void FillContext(SRuntimeContextConfig &config,const string symbol,
@@ -251,15 +251,9 @@ double OnTester(void)
         }
      }
 
-   string forbidden="";
-   // The unchanged Primary compatibility pipeline intentionally owns these
-   // aliases. Context view writes are proved absent by the isolation harness,
-   // zero fallback reads, and zero wrong-context accesses below.
-   const bool primary_legacy_available=
-      bus.TryGetText(FENX_DATABUS_KEY_TRADING_STYLE_UPDATED_AT,forbidden) &&
-      bus.TryGetText(FENX_DATABUS_KEY_STRATEGY_SELECTION_UPDATED_AT,forbidden) &&
-      bus.TryGetText(FENX_DATABUS_KEY_STANDBY_SYSTEM_UPDATED_AT,forbidden) &&
-      bus.TryGetText(FENX_DATABUS_KEY_RISK_SYSTEM_UPDATED_AT,forbidden);
+   const bool canonical_schema=(bus.LegacySchemaKeyCount()==0 &&
+      bus.InvalidSchemaKeyCount()==0 && bus.LegacyWriteAttemptCount()==0 &&
+      bus.LegacyReadAttemptCount()==0);
    SGlobalRiskAggregateSnapshot aggregate;
    ResetGlobalRiskAggregateSnapshot(aggregate);
    const bool aggregate_ok=(aggregate_store!=NULL &&
@@ -305,13 +299,16 @@ double OnTester(void)
    const bool pass=(contexts_complete && state_isolated && source_time_safe &&
       secondary_non_trading && execution_initialized && strategy_capability &&
       secondary_orders==0 && secondary_positions==0 &&
-      primary_legacy_available && aggregate_ok && global_health_ok && counts &&
+      canonical_schema && aggregate_ok && global_health_ok && counts &&
       recovery_isolated && entry_resume_isolated && health_isolated &&
-      bus.LegacyFallbackReadCount()==0 && bus.ContextViewWrongSymbolCount()==0 &&
+      bus.ContextViewWrongSymbolCount()==0 &&
       spare>=30.0);
-   PrintFormat("[TASK031 REAL SUMMARY] Result=%s;Contexts=%d;Engines=%d;DataBus=%d;Remaining=%d;Spare=%.2f;RecoveryInfrastructure=%d;RegisteredContextRecoveryHealth=%d;RecoveryCrossContext=%d;EntryResumeWrongContext=%d;HealthWrongContext=%d;ExecutionPositionRouterLinkage=%d;DataLeak=%I64d;TradeLeak=%I64d;RuntimeError=%I64d;RequiredUnavailable=%d;OptionalUnavailable=%d;ExpectedInvalid=%d;ExpectedStale=%d;SecondaryOrder=%I64d;SecondaryPosition=%I64d",
+   PrintFormat("[TASK032 REAL SUMMARY] Result=%s;Contexts=%d;Engines=%d;DataBus=%d;Remaining=%d;Spare=%.2f;LegacyWrite=%I64d;LegacyRead=%I64d;LegacySchema=%d;InvalidSchema=%d;WrongContext=%I64d;RecoveryInfrastructure=%d;RegisteredContextRecoveryHealth=%d;RecoveryCrossContext=%d;EntryResumeWrongContext=%d;HealthWrongContext=%d;ExecutionPositionRouterLinkage=%d;DataLeak=%I64d;TradeLeak=%I64d;RuntimeError=%I64d;RequiredUnavailable=%d;OptionalUnavailable=%d;ExpectedInvalid=%d;ExpectedStale=%d;SecondaryOrder=%I64d;SecondaryPosition=%I64d",
       (pass ? "PASS" : "FAIL"),checked,manager.Count(),bus.CurrentSize(),
-      bus.RemainingCapacity(),spare,registry.RecoveryHealthInfrastructureCount(),
+      bus.RemainingCapacity(),spare,bus.LegacyWriteAttemptCount(),
+      bus.LegacyReadAttemptCount(),bus.LegacySchemaKeyCount(),
+      bus.InvalidSchemaKeyCount(),bus.ContextViewWrongSymbolCount(),
+      registry.RecoveryHealthInfrastructureCount(),
       registry.RegisteredContextRecoveryHealthEngineCount(),
       global_health.recovery_cross_context_count,
       global_health.entry_resume_wrong_context_count,

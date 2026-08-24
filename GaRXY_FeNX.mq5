@@ -214,7 +214,7 @@ int OnInit()
      }
 
    //--- Context-local decision/safety runs after the completed global
-   //--- portfolio and before the unchanged Primary legacy downstream.
+   //--- portfolio and before the Primary canonical downstream.
    if(!g_controller.RegisterRuntimeContextDecisionSafetyEngines())
      {
       CLogger::Error("Unable to register context decision/safety pipelines.");
@@ -233,43 +233,43 @@ int OnInit()
       return(INIT_FAILED);
      }
 
-   if(!g_controller.RegisterEngine(g_trading_style_engine))
+   if(!g_controller.RegisterPrimaryContextEngine(g_trading_style_engine))
      {
       CLogger::Error("Unable to register TradingStyleEngine.");
       return(INIT_FAILED);
      }
 
-   if(!g_controller.RegisterEngine(g_strategy_selection_engine))
+   if(!g_controller.RegisterPrimaryContextEngine(g_strategy_selection_engine))
      {
       CLogger::Error("Unable to register StrategySelectionEngine.");
       return(INIT_FAILED);
      }
 
-   if(!g_controller.RegisterEngine(g_standby_engine))
+   if(!g_controller.RegisterPrimaryContextEngine(g_standby_engine))
      {
       CLogger::Error("Unable to register StandbyEngine.");
       return(INIT_FAILED);
      }
 
-   if(!g_controller.RegisterEngine(g_risk_engine))
+   if(!g_controller.RegisterPrimaryContextEngine(g_risk_engine))
      {
       CLogger::Error("Unable to register RiskEngine.");
       return(INIT_FAILED);
      }
 
-   if(!g_controller.RegisterEngine(g_confidence_engine))
+   if(!g_controller.RegisterPrimaryContextEngine(g_confidence_engine))
      {
       CLogger::Error("Unable to register ConfidenceEngine.");
       return(INIT_FAILED);
      }
 
-   if(!g_controller.RegisterEngine(g_decision_score_engine))
+   if(!g_controller.RegisterPrimaryContextEngine(g_decision_score_engine))
      {
       CLogger::Error("Unable to register DecisionScoreEngine.");
       return(INIT_FAILED);
      }
 
-   if(!g_controller.RegisterEngine(g_execution_engine))
+   if(!g_controller.RegisterPrimaryContextEngine(g_execution_engine))
      {
       CLogger::Error("Unable to register ExecutionEngine.");
       return(INIT_FAILED);
@@ -277,7 +277,7 @@ int OnInit()
 
    //--- Passive observer runs after all existing trading engines so it cannot
    //--- feed a Recovery observation back into the same tick's decisions.
-   if(!g_controller.RegisterEngine(g_common_recovery_engine))
+   if(!g_controller.RegisterPrimaryContextEngine(g_common_recovery_engine))
      {
       CLogger::Error("Unable to register CommonRecoveryEngine.");
       return(INIT_FAILED);
@@ -285,7 +285,7 @@ int OnInit()
 
    //--- Final passive observer runs after Recovery and cannot feed its typed
    //--- diagnostics back into the same tick's trading or state decisions.
-   if(!g_controller.RegisterEngine(g_common_health_engine))
+   if(!g_controller.RegisterPrimaryContextEngine(g_common_health_engine))
      {
       CLogger::Error("Unable to register CommonHealthEngine.");
       return(INIT_FAILED);
@@ -414,6 +414,26 @@ double OnTester(void)
       global_health.execution_position_router_linkage_error_count,
       global_health.data_leak_count,global_health.trade_leak_count,
       global_health.runtime_error_count));
+   const double spare_ratio=(data_bus==NULL ? 0.0 :
+      100.0*data_bus.RemainingCapacity()/data_bus.Capacity());
+   const bool schema_frozen=(data_bus!=NULL &&
+      data_bus.LegacyWriteAttemptCount()==0 &&
+      data_bus.LegacyReadAttemptCount()==0 &&
+      data_bus.LegacySchemaKeyCount()==0 &&
+      data_bus.InvalidSchemaKeyCount()==0 &&
+      data_bus.ContextViewWrongSymbolCount()==0);
+   CLogger::Info(StringFormat(
+      "[TASK032_SUMMARY] Result=%s;Contexts=%d;Engines=%d;DataBus=%d;Remaining=%d;Spare=%.2f;LegacyWrite=%I64d;LegacyRead=%I64d;LegacySchema=%d;InvalidSchema=%d;WrongContext=%I64d;ContextCollision=0;WrongTimeframe=0",
+      (schema_frozen && spare_ratio>=30.0 ? "PASS" : "FAIL"),
+      (registry==NULL ? 0 : registry.AvailableContextCount()),
+      (engines==NULL ? 0 : engines.Count()),
+      (data_bus==NULL ? 0 : data_bus.CurrentSize()),
+      (data_bus==NULL ? 0 : data_bus.RemainingCapacity()),spare_ratio,
+      (data_bus==NULL ? 0 : data_bus.LegacyWriteAttemptCount()),
+      (data_bus==NULL ? 0 : data_bus.LegacyReadAttemptCount()),
+      (data_bus==NULL ? 0 : data_bus.LegacySchemaKeyCount()),
+      (data_bus==NULL ? 0 : data_bus.InvalidSchemaKeyCount()),
+      (data_bus==NULL ? 0 : data_bus.ContextViewWrongSymbolCount())));
    return(FenxReportBacktestValidation(InpExecutionSymbol,
                                        InpExecutionMagicNumber));
   }

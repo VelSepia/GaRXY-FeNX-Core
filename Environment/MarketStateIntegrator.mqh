@@ -64,26 +64,26 @@ private:
       return(MathMax(0.0,MathMin(100.0,value)));
      }
 
-   bool ReadDouble(const string key,double &value)
+   bool ReadDouble(const string name_space,const string field,double &value)
      {
       if(m_data_bus==NULL)
          return(false);
 
       string text="";
-      if(!m_context.ReadEnvironmentLegacy(m_data_bus,key,text) || StringLen(text)==0)
+      if(!m_context.ReadText(m_data_bus,name_space,field,text) || StringLen(text)==0)
          return(false);
 
       value=StringToDouble(text);
       return(true);
      }
 
-   bool ReadBoolean(const string key,bool &value)
+   bool ReadBoolean(const string name_space,const string field,bool &value)
      {
       if(m_data_bus==NULL)
          return(false);
 
       string text="";
-      if(!m_context.ReadEnvironmentLegacy(m_data_bus,key,text))
+      if(!m_context.ReadText(m_data_bus,name_space,field,text))
          return(false);
       if(text=="true" || text=="TRUE")
         {
@@ -99,17 +99,17 @@ private:
       return(false);
      }
 
-   bool ReadText(const string key,string &value)
+   bool ReadText(const string name_space,const string field,string &value)
      {
-      if(m_data_bus==NULL || !m_context.ReadEnvironmentLegacy(m_data_bus,key,value))
+      if(m_data_bus==NULL || !m_context.ReadText(m_data_bus,name_space,field,value))
          return(false);
       return(StringLen(value)>0);
      }
 
-   bool ReadTimestamp(const string key,datetime &value)
+   bool ReadTimestamp(const string name_space,const string field,datetime &value)
      {
       string text="";
-      if(!ReadText(key,text))
+      if(!ReadText(name_space,field,text))
          return(false);
       value=StringToTime(text);
       return(value>0);
@@ -119,13 +119,13 @@ private:
                    double &trend_strength,double &volatility_score,double &atr,
                    double &adx)
      {
-      return(ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_SCORE,range_score) &&
-             ReadBoolean(FENX_DATABUS_KEY_ENVIRONMENT_IS_RANGE,is_range) &&
-             ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_TREND_SCORE,trend_score) &&
-             ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_TREND_STRENGTH,trend_strength) &&
-             ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_VOLATILITY_SCORE,volatility_score) &&
-             ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_ATR,atr) &&
-             ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_TREND_ADX,adx));
+      return(ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Score",range_score) &&
+             ReadBoolean(FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"IsRange",is_range) &&
+             ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Score",trend_score) &&
+             ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Strength",trend_strength) &&
+             ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"Score",volatility_score) &&
+             ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"ATR",atr) &&
+             ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"ADX",adx));
      }
 
    bool BuildSnapshot(const double range_score,const bool is_range,
@@ -193,31 +193,31 @@ private:
          return(false);
 
       bool success=true;
-      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,
-             "State",FENX_DATABUS_KEY_ENVIRONMENT_MARKET_STATE,
+      if(!m_context.PublishText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,
+             "State",
              snapshot.market_state))
          success=false;
-      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,
-             "Confidence",FENX_DATABUS_KEY_ENVIRONMENT_MARKET_CONFIDENCE,
+      if(!m_context.PublishText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,
+             "Confidence",
              DoubleToString(snapshot.confidence,2)))
          success=false;
-      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,
-             "RecommendedTradingStyle",FENX_DATABUS_KEY_ENVIRONMENT_RECOMMENDED_STYLE,
+      if(!m_context.PublishText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,
+             "RecommendedTradingStyle",
              snapshot.recommended_trading_style))
          success=false;
-      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,
-             "RecommendedRiskLevel",FENX_DATABUS_KEY_ENVIRONMENT_RECOMMENDED_RISK,
+      if(!m_context.PublishText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,
+             "RecommendedRiskLevel",
              snapshot.recommended_risk_level))
          success=false;
-      if(!m_context.PublishGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,
-             "UpdatedAt",FENX_DATABUS_KEY_ENVIRONMENT_MARKET_UPDATED_AT,
+      if(!m_context.PublishText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,
+             "UpdatedAt",
              TimeToString(snapshot.updated_at,TIME_DATE|TIME_SECONDS)))
          success=false;
 
       return(success);
      }
 
-   //--- Mirrors the exact legacy source values after Market State has already
+   //--- Mirrors the exact canonical source values after Market State has already
    //--- been classified and published. These reads never participate in the
    //--- existing classification predicates or their priority.
    void BuildTypedSnapshot(SMarketStateSnapshot &snapshot,
@@ -240,30 +240,30 @@ private:
       bool range_source_valid=false;
       bool trend_source_valid=false;
       const bool range_valid_read=
-         ReadBoolean(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_DATA_VALID,
-                     range_source_valid);
+         ReadBoolean(FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"IsDataValid",
+                      range_source_valid);
       const bool trend_valid_read=
-         ReadBoolean(FENX_DATABUS_KEY_ENVIRONMENT_TREND_DATA_VALID,
-                     trend_source_valid);
+         ReadBoolean(FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"IsDataValid",
+                      trend_source_valid);
       const bool volatility_level_read=
-         ReadText(FENX_DATABUS_KEY_ENVIRONMENT_VOLATILITY_LEVEL,
-                  snapshot.volatility_level);
+         ReadText(FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"Level",
+                   snapshot.volatility_level);
       const bool trend_direction_read=
-         ReadText(FENX_DATABUS_KEY_ENVIRONMENT_TREND_DIRECTION,
-                  snapshot.trend_direction);
+         ReadText(FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Direction",
+                   snapshot.trend_direction);
       const bool trend_confidence_read=
-         ReadDouble(FENX_DATABUS_KEY_ENVIRONMENT_TREND_CONFIDENCE,
-                    snapshot.trend_confidence);
+         ReadDouble(FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"Confidence",
+                     snapshot.trend_confidence);
       const bool is_trend_read=
-         ReadBoolean(FENX_DATABUS_KEY_ENVIRONMENT_IS_TREND,snapshot.is_trend);
+         ReadBoolean(FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"IsTrend",snapshot.is_trend);
       const bool range_time_read=
-         ReadTimestamp(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_UPDATED_AT,
-                       snapshot.range_updated_at);
+         ReadTimestamp(FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"UpdatedAt",
+                        snapshot.range_updated_at);
       const bool trend_time_read=
-         ReadTimestamp(FENX_DATABUS_KEY_ENVIRONMENT_TREND_UPDATED_AT,
-                       snapshot.trend_updated_at);
-      ReadTimestamp(FENX_DATABUS_KEY_ENVIRONMENT_RANGE_CLOSED_BAR_TIME,
-                    snapshot.source_bar_time);
+         ReadTimestamp(FENX_DATABUS_NAMESPACE_CONTEXT_TREND,"UpdatedAt",
+                        snapshot.trend_updated_at);
+      ReadTimestamp(FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"ClosedBarTime",
+                     snapshot.source_bar_time);
 
       snapshot.volatility_valid=(snapshot.is_data_valid &&
                                   volatility_level_read && atr>0.0 &&
@@ -334,11 +334,11 @@ private:
 
       string state="",confidence="",style="",risk="",updated="";
       if(m_data_bus==NULL ||
-         !m_context.ReadEnvironmentLegacy(m_data_bus,FENX_DATABUS_KEY_ENVIRONMENT_MARKET_STATE,state) ||
-         !m_context.ReadEnvironmentLegacy(m_data_bus,FENX_DATABUS_KEY_ENVIRONMENT_MARKET_CONFIDENCE,confidence) ||
-         !m_context.ReadEnvironmentLegacy(m_data_bus,FENX_DATABUS_KEY_ENVIRONMENT_RECOMMENDED_STYLE,style) ||
-         !m_context.ReadEnvironmentLegacy(m_data_bus,FENX_DATABUS_KEY_ENVIRONMENT_RECOMMENDED_RISK,risk) ||
-         !m_context.ReadEnvironmentLegacy(m_data_bus,FENX_DATABUS_KEY_ENVIRONMENT_MARKET_UPDATED_AT,updated))
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,"State",state) ||
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,"Confidence",confidence) ||
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,"RecommendedTradingStyle",style) ||
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,"RecommendedRiskLevel",risk) ||
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_MARKET,"UpdatedAt",updated))
          return(false);
 
       return(state==snapshot.market_state &&
@@ -364,15 +364,13 @@ public:
       m_snapshot_count=0;
      }
 
-   bool              SetRuntimeContext(const SRuntimeContextId &context_id,
-                                       const bool publish_primary_legacy)
+   bool              SetRuntimeContext(const SRuntimeContextId &context_id)
      {
-      return(!m_initialized &&
-             m_context.Configure(context_id,publish_primary_legacy));
+      return(!m_initialized && m_context.Configure(context_id));
      }
 
    //--- Injects the non-owning typed store before framework initialization.
-   //--- All trading consumers continue to use legacy Environment.Market keys.
+   //--- All consumers use the canonical Market context contract.
    bool              SetSnapshotStore(CCommonSnapshotStore &snapshot_store)
      {
       if(m_initialized)

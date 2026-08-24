@@ -51,9 +51,8 @@ private:
          return(false);
 
       string atr_text="";
-      if(!m_context.ReadGlobalLegacy(m_data_bus,
-            FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"ATR",
-            FENX_DATABUS_KEY_ENVIRONMENT_ATR,atr_text))
+      if(!m_context.ReadText(m_data_bus,
+            FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,"ATR",atr_text))
          return(false);
 
       atr=StringToDouble(atr_text);
@@ -239,61 +238,51 @@ private:
 
       const int symbol_digits=(int)SymbolInfoInteger(m_context.Symbol(),SYMBOL_DIGITS);
       bool success=true;
-      if(!m_context.PublishGlobalLegacy(m_data_bus,
+      if(!m_context.PublishText(m_data_bus,
              FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Upper",
-             FENX_DATABUS_KEY_ENVIRONMENT_RANGE_UPPER,
              DoubleToString(snapshot.upper,symbol_digits)))
          success=false;
-      if(!m_context.PublishGlobalLegacy(m_data_bus,
+      if(!m_context.PublishText(m_data_bus,
              FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Lower",
-             FENX_DATABUS_KEY_ENVIRONMENT_RANGE_LOWER,
              DoubleToString(snapshot.lower,symbol_digits)))
          success=false;
-      if(!m_context.PublishGlobalLegacy(m_data_bus,
+      if(!m_context.PublishText(m_data_bus,
              FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"WidthPoints",
-             FENX_DATABUS_KEY_ENVIRONMENT_RANGE_WIDTH_POINTS,
              DoubleToString(snapshot.width_points,2)))
          success=false;
-      if(!m_context.PublishGlobalLegacy(m_data_bus,
+      if(!m_context.PublishText(m_data_bus,
              FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Midpoint",
-             FENX_DATABUS_KEY_ENVIRONMENT_RANGE_MIDPOINT,
              DoubleToString(snapshot.midpoint,symbol_digits)))
          success=false;
-      if(!m_context.PublishGlobalLegacy(m_data_bus,
+      if(!m_context.PublishText(m_data_bus,
              FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Position",
-             FENX_DATABUS_KEY_ENVIRONMENT_RANGE_POSITION,
              DoubleToString(snapshot.position,4)))
          success=false;
-      if(!m_context.PublishGlobalLegacy(m_data_bus,
+      if(!m_context.PublishText(m_data_bus,
              FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Score",
-             FENX_DATABUS_KEY_ENVIRONMENT_RANGE_SCORE,
              DoubleToString(snapshot.score,2)))
          success=false;
-      if(!m_context.PublishGlobalLegacy(m_data_bus,
+      if(!m_context.PublishText(m_data_bus,
              FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"IsRange",
-             FENX_DATABUS_KEY_ENVIRONMENT_IS_RANGE,
              (snapshot.is_range ? "true" : "false")))
          success=false;
-      if(!m_context.PublishGlobalLegacy(m_data_bus,
+      if(!m_context.PublishText(m_data_bus,
              FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"IsDataValid",
-             FENX_DATABUS_KEY_ENVIRONMENT_RANGE_DATA_VALID,
              (snapshot.is_data_valid ? "true" : "false")))
          success=false;
-      if(!m_context.PublishGlobalLegacy(m_data_bus,
+      if(!m_context.PublishText(m_data_bus,
              FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"UpdatedAt",
-             FENX_DATABUS_KEY_ENVIRONMENT_RANGE_UPDATED_AT,
              TimeToString(snapshot.updated_at,TIME_DATE|TIME_SECONDS)))
          success=false;
-      if(!m_context.PublishGlobalLegacy(m_data_bus,
+      if(!m_context.PublishText(m_data_bus,
              FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"ClosedBarTime",
-             FENX_DATABUS_KEY_ENVIRONMENT_RANGE_CLOSED_BAR_TIME,
              TimeToString(snapshot.closed_bar_time,TIME_DATE|TIME_SECONDS)))
          success=false;
 
       return(success);
      }
 
-   //--- Completes the typed mirror only after legacy publication. The source
+   //--- Completes the typed mirror only after canonical publication. The source
    //--- values are normalized to the exact existing DataBus precision; no
    //--- boundary, score, or IsRange calculation is repeated here.
    void BuildTypedSnapshot(SRangeSnapshot &snapshot,const double atr)
@@ -362,16 +351,16 @@ private:
       string is_range="",is_valid="",updated="",closed_bar="";
       const int digits=(int)SymbolInfoInteger(m_context.Symbol(),SYMBOL_DIGITS);
       if(m_data_bus==NULL ||
-         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Upper",FENX_DATABUS_KEY_ENVIRONMENT_RANGE_UPPER,upper) ||
-         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Lower",FENX_DATABUS_KEY_ENVIRONMENT_RANGE_LOWER,lower) ||
-         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"WidthPoints",FENX_DATABUS_KEY_ENVIRONMENT_RANGE_WIDTH_POINTS,width) ||
-         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Midpoint",FENX_DATABUS_KEY_ENVIRONMENT_RANGE_MIDPOINT,midpoint) ||
-         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Position",FENX_DATABUS_KEY_ENVIRONMENT_RANGE_POSITION,position) ||
-         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Score",FENX_DATABUS_KEY_ENVIRONMENT_RANGE_SCORE,score) ||
-         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"IsRange",FENX_DATABUS_KEY_ENVIRONMENT_IS_RANGE,is_range) ||
-         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"IsDataValid",FENX_DATABUS_KEY_ENVIRONMENT_RANGE_DATA_VALID,is_valid) ||
-         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"UpdatedAt",FENX_DATABUS_KEY_ENVIRONMENT_RANGE_UPDATED_AT,updated) ||
-         !m_context.ReadGlobalLegacy(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"ClosedBarTime",FENX_DATABUS_KEY_ENVIRONMENT_RANGE_CLOSED_BAR_TIME,closed_bar))
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Upper",upper) ||
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Lower",lower) ||
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"WidthPoints",width) ||
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Midpoint",midpoint) ||
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Position",position) ||
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"Score",score) ||
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"IsRange",is_range) ||
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"IsDataValid",is_valid) ||
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"UpdatedAt",updated) ||
+         !m_context.ReadText(m_data_bus,FENX_DATABUS_NAMESPACE_CONTEXT_RANGE,"ClosedBarTime",closed_bar))
          return(false);
 
       return(upper==DoubleToString(snapshot.upper,digits) &&
@@ -407,15 +396,13 @@ public:
       m_snapshot_count=0;
      }
 
-   bool              SetRuntimeContext(const SRuntimeContextId &context_id,
-                                       const bool publish_primary_legacy)
+   bool              SetRuntimeContext(const SRuntimeContextId &context_id)
      {
-      return(!m_initialized &&
-             m_context.Configure(context_id,publish_primary_legacy));
+      return(!m_initialized && m_context.Configure(context_id));
      }
 
    //--- Injects the non-owning typed store before framework initialization.
-   //--- All trading consumers continue to use the legacy Range DataBus keys.
+   //--- All consumers use the canonical Range context contract.
    bool              SetSnapshotStore(CCommonSnapshotStore &snapshot_store)
      {
       if(m_initialized)

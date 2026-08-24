@@ -18,25 +18,22 @@
 #define FENX_DATABUS_BASELINE_FIXED_ENTRIES       89
 #define FENX_DATABUS_BASELINE_PER_SYMBOL_ENTRIES  59
 
-//--- Task027 context-local analysis publication. The six promoted engines
-//--- publish 67 canonical context keys in total (3+10+9+5+32+8). Primary
-//--- compatibility keys are additional migration aliases and remain unchanged.
+//--- Frozen Task032 context-local analysis publication. CommonEnvironment is
+//--- typed-only, leaving 35 canonical keys in DataBus (3+10+9+5+8).
 #define FENX_ANALYSIS_ENGINES_PER_CONTEXT          6
 #define FENX_DECISION_SAFETY_ENGINES_PER_CONTEXT   6
 #define FENX_DECISION_SAFETY_CONTEXT_KEY_COUNT     116
-#define FENX_ANALYSIS_CONTEXT_KEY_COUNT            67
+#define FENX_ANALYSIS_CONTEXT_KEY_COUNT            35
 #define FENX_EXECUTION_CONTEXT_KEY_COUNT            26
 #define FENX_EXECUTION_ENGINES_PER_SECONDARY_CONTEXT 1
 #define FENX_DATABUS_MINIMUM_SPARE_RATIO           0.30
 
-//--- Canonical context namespaces for analysis facts that historically used
-//--- global Environment.* keys. CommonEnvironment and MarketSelection already
-//--- have stable namespaces and therefore reuse their existing names below.
+//--- Canonical context namespaces for analysis facts.
 #define FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY  "EnvironmentVolatility"
 #define FENX_DATABUS_NAMESPACE_CONTEXT_RANGE       "EnvironmentRange"
 #define FENX_DATABUS_NAMESPACE_CONTEXT_TREND       "EnvironmentTrend"
 #define FENX_DATABUS_NAMESPACE_CONTEXT_MARKET      "EnvironmentMarket"
-//--- Context-local views of legacy global summaries. Separate namespaces
+//--- Context-local views of engine summary fields. Separate namespaces
 //--- prevent fields such as RankingUpdatedAt from colliding with the existing
 //--- per-context candidate fields in PairRanking/CapitalAllocation.
 #define FENX_DATABUS_NAMESPACE_CONTEXT_PAIR_RANKING_GLOBAL       "ContextPairRankingGlobal"
@@ -98,42 +95,11 @@
 //--- Environment.Market.* keys remain the authoritative trading interface.
 #define FENX_COMMON_MARKET_STATE_SNAPSHOT_VERSION         "1.0"
 
-//--- Shadow-only Common Environment snapshot contract
+//--- Typed-only Common Environment snapshot contract. Its former 32-field
+//--- DataBus shadow had zero consumers and was retired in Task032; only the
+//--- version and zero-capacity contribution remain part of the typed contract.
 #define FENX_COMMON_ENVIRONMENT_SNAPSHOT_VERSION                  "1.0"
-#define FENX_COMMON_ENVIRONMENT_KEY_COUNT                         32
-#define FENX_DATABUS_NAMESPACE_COMMON_ENVIRONMENT                 "CommonEnvironment"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_VALID               "Valid"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_FRESH               "Fresh"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_VERSION             "Version"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_UPDATED_AT          "UpdatedAt"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_INVALID_REASON      "InvalidReason"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_SYMBOL              "Symbol"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_TIMEFRAME           "Timeframe"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_VOLATILITY_VALID    "VolatilityValid"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RANGE_VALID         "RangeValid"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_TREND_VALID         "TrendValid"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_MARKET_STATE_VALID  "MarketStateValid"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_ATR                 "ATR"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_VOLATILITY_SCORE    "VolatilityScore"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_VOLATILITY_LEVEL    "VolatilityLevel"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RANGE_UPPER         "RangeUpper"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RANGE_LOWER         "RangeLower"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RANGE_MIDPOINT      "RangeMidpoint"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RANGE_WIDTH_POINTS  "RangeWidthPoints"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RANGE_POSITION      "RangePosition"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RANGE_SCORE         "RangeScore"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_IS_RANGE            "IsRange"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_TREND_DIRECTION     "TrendDirection"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_TREND_STRENGTH      "TrendStrength"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_TREND_SCORE         "TrendScore"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_TREND_SLOPE         "TrendSlope"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_TREND_CONFIDENCE    "TrendConfidence"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_ADX                 "ADX"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_IS_TREND            "IsTrend"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_MARKET_STATE        "MarketState"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_MARKET_CONFIDENCE   "MarketConfidence"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RECOMMENDED_STYLE   "RecommendedStyle"
-#define FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_RECOMMENDED_RISK    "RecommendedRisk"
+#define FENX_COMMON_ENVIRONMENT_KEY_COUNT                         0
 
 //--- Shadow-only Common Confidence summary contract. Detailed source facts
 //--- remain in CCommonSnapshotStore; DataBus receives only bounded summaries.

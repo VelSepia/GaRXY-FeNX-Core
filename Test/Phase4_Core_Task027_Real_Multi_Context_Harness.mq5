@@ -125,7 +125,7 @@ double OnTester(void)
    bool identities=true;
    bool updates=true;
    bool handles=(registry.IndicatorHandleCount()==available*3);
-   bool legacy_denial=true;
+   bool canonical_isolation=true;
    CRuntimeContext *primary=registry.Primary();
    const string primary_symbol=(primary==NULL ? "" : primary.Id().symbol);
    for(int index=0;index<registry.Count();index++)
@@ -156,38 +156,33 @@ double OnTester(void)
                runtime.MarketSelection().UpdateCount()>0);
       if(index>0 && id.symbol!=primary_symbol)
         {
-         string forbidden="";
-         legacy_denial=(legacy_denial &&
-            !bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_COMMON_ENVIRONMENT,
-                                  id.symbol,FENX_DATABUS_FIELD_COMMON_ENVIRONMENT_VALID,
-                                  forbidden) &&
-            !bus.TryGetSymbolText(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,
-                                  id.symbol,FENX_DATABUS_FIELD_MARKET_SELECTION_SCORE,
-                                  forbidden));
+         string context_score="";
+         canonical_isolation=(canonical_isolation &&
+            bus.TryGetContextText(FENX_DATABUS_NAMESPACE_MARKET_SELECTION,
+                                  id,FENX_DATABUS_FIELD_MARKET_SELECTION_SCORE,
+                                  context_score));
         }
      }
 
    string primary_context_atr="";
-   string primary_legacy_atr="";
-   const bool primary_alias=(primary!=NULL &&
+   const bool primary_canonical=(primary!=NULL &&
       bus.TryGetContextText(FENX_DATABUS_NAMESPACE_CONTEXT_VOLATILITY,
-                            primary.Id(),"ATR",primary_context_atr) &&
-      bus.TryGetText(FENX_DATABUS_KEY_ENVIRONMENT_ATR,primary_legacy_atr) &&
-      primary_context_atr==primary_legacy_atr);
+                            primary.Id(),"ATR",primary_context_atr));
    SVolatilitySnapshot wrong;
    const bool wrong_get_denied=!g_snapshots.GetVolatilitySnapshot(
       "EURUSD",PERIOD_M15,wrong);
    const double spare_ratio=100.0*bus.RemainingCapacity()/bus.Capacity();
    const bool expected_contexts=(available==InpTask027ContextCount);
    const bool pass=(expected_contexts && identities && updates && handles &&
-      legacy_denial && primary_alias && wrong_get_denied &&
-      bus.LegacyFallbackReadCount()==0 && spare_ratio>=30.0);
+      canonical_isolation && primary_canonical && wrong_get_denied &&
+      bus.LegacySchemaKeyCount()==0 && bus.LegacyWriteAttemptCount()==0 &&
+      bus.LegacyReadAttemptCount()==0 && spare_ratio>=30.0);
    PrintFormat("[TASK027 REAL SUMMARY] Result=%s;Contexts=%d;Engines=%d;Handles=%d;DataBus=%d;Remaining=%d;Spare=%.2f;Snapshots=%d;WrongGet=%d;SecondaryLegacy=%d;Fallback=%d;SecondaryEntry=0;SecondaryExit=0;SecondaryExecution=0;SecondaryOrder=0;SecondaryPosition=0",
                (pass ? "PASS" : "FAIL"),available,
                registry.AnalysisEngineCount(),registry.IndicatorHandleCount(),
                bus.CurrentSize(),bus.RemainingCapacity(),spare_ratio,
                g_snapshots.Count(),(wrong_get_denied ? 0 : 1),
-               (legacy_denial ? 0 : 1),bus.LegacyFallbackReadCount());
+               (canonical_isolation ? 0 : 1),bus.LegacyReadAttemptCount());
    return(pass ? 1.0 : 0.0);
   }
 

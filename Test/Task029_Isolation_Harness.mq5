@@ -243,7 +243,9 @@ int OnInit(void)
       missing_decision.bottleneck_stage=="CapitalAllocation");
    Record(31,"No wrong-context DataBus access",
           g_bus.ContextViewWrongSymbolCount()==0 &&
-          g_bus.LegacyFallbackReadCount()==0 &&
+          g_bus.LegacySchemaKeyCount()==0 &&
+          g_bus.LegacyWriteAttemptCount()==0 &&
+          g_bus.LegacyReadAttemptCount()==0 &&
           g_store.ConfidenceSnapshotCount()==5 &&
           g_store.DecisionScoreSnapshotCount()==5);
    return(INIT_SUCCEEDED);
